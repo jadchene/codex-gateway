@@ -4,23 +4,17 @@
 
 Personal Codex account manager and transparent local gateway.
 
-Codex Gateway is a local desktop app built with Electron, React, and Vite. It manages multiple ChatGPT/Codex accounts and exposes a transparent local OpenAI-compatible gateway for Codex CLI and other compatible clients. It is designed for personal local usage: account login, quota refresh, Codex auth writes, request forwarding, and token usage records live in one desktop app.
+Codex Gateway is a local desktop app built with Electron, React, and Vite. It manages multiple ChatGPT/Codex accounts and exposes a transparent local OpenAI-compatible gateway for Codex. It is designed for personal local usage: account login, quota refresh, Codex auth writes, request forwarding, and token usage records live in one desktop app.
 
 ### Features
 
-- Browser-based ChatGPT/Codex OAuth login without manually entering tokens; local import from `~/.codex/auth.json` is also supported for account-mode auth.
-- Local SQLite storage for accounts, quota snapshots, authentication state, and app settings.
-- 5-hour and 7-day quota windows with manual, scheduled, and quota-reset refresh.
-- Local OpenAI-compatible gateway, using app port `8435` and gateway port `8436` by default.
-- Dynamic account selection based on enablement, subscription validity, and quota availability; quota/rate-limit failures trigger refresh and failover.
-- Codex authentication management with gateway mode and account mode.
-- Writes `~/.codex/auth.json` and maintains the `~/.codex/config.toml` provider when needed.
-- Token usage records for input, cached input, actual-input hover hints, output, and total tokens.
-- Call records support date range, session ID, and account-stat-card filters; account names and session IDs can be clicked to copy.
-- Application runtime logs for startup auth detection, account refresh, gateway start/stop, auth writes, and failures.
-- App settings include clearing call records and runtime logs.
-- Close-to-tray support with tray actions for starting/stopping the gateway and exiting the app.
-- Window size and position persistence, plus optional gateway auto-start.
+- **Dashboard**: View runtime overview, available account ratio, gateway status, and today's token usage statistics.
+- **Accounts**: Login via browser OAuth, track 5-hour and 7-day quota windows, and support manual, scheduled, and automatic quota-reset refreshes.
+- **Auth Management**: Seamlessly switch between Gateway and Account modes, writing the necessary config to `~/.codex/auth.json` and `~/.codex/config.toml` automatically.
+- **Gateway**: Exposes a transparent `/v1/responses` gateway for Codex, featuring automatic routing and failover across multiple accounts based on quota availability.
+- **Call Logs**: Detailed history of requests with input/output token usage, duration, and filtering by account or session ID.
+- **App Logs**: Track application lifecycle events, background quota refreshes, and auth-write statuses.
+- **Settings**: Configure the local gateway port, local API key, scheduled refresh intervals, and manage local data.
 
 ### Gateway Endpoints
 
@@ -70,7 +64,7 @@ Windows executable:
 release/win-unpacked/Codex Gateway.exe
 ```
 
-### Codex CLI Integration
+### Codex Integration
 
 The `Auth Management` page supports two modes:
 
@@ -103,7 +97,16 @@ Account tokens and the local API key are stored only on your machine. Do not com
 
 ### Project Status
 
-This project is still moving quickly. Gateway compatibility may change with Codex CLI and upstream API behavior. After upgrading, verify auth writes, quota refresh, and your common request paths before relying on it for critical work.
+This project is still moving quickly. Gateway compatibility may change with Codex and upstream API behavior. After upgrading, verify auth writes, quota refresh, and your common request paths before relying on it for critical work.
+
+### License
+
+MIT
+does not provide multi-tenant isolation beyond the local gateway API key.
+
+### Project Status
+
+This project is still moving quickly. Gateway compatibility may change with Codex and upstream API behavior. After upgrading, verify auth writes, quota refresh, and your common request paths before relying on it for critical work.
 
 ### License
 

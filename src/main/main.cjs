@@ -202,7 +202,7 @@ function registerIpc() {
     const settings = store.getSettings();
     const result = applyGatewayMode(settings);
     store.saveSettings({ codex_auth_mode: "gateway", codex_selected_account_id: "" });
-    store.addAppLog({ scope: "auth", action: "apply-gateway", status: "success", message: "已写入 Codex CLI 网关模式认证" });
+    store.addAppLog({ scope: "auth", action: "apply-gateway", status: "success", message: "已写入 Codex 网关模式认证" });
     return result;
   });
   ipcMain.handle("codexAuth:applyAccountMode", (_event, accountId) => {
@@ -210,7 +210,7 @@ function registerIpc() {
     if (!account) throw new Error("账号不存在。");
     const result = applyAccountMode(account);
     store.saveSettings({ codex_auth_mode: "account", codex_selected_account_id: account.id });
-    store.addAppLog({ scope: "auth", action: "apply-account", status: "success", message: `已写入 Codex CLI 账号模式认证：${account.name}` });
+    store.addAppLog({ scope: "auth", action: "apply-account", status: "success", message: `已写入 Codex 账号模式认证：${account.name}` });
     return result;
   });
   ipcMain.handle("auth:startLogin", async () => {

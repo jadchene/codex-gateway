@@ -498,7 +498,7 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
       <div className="section-title">
         <div>
           <h2>认证管理</h2>
-          <p className="subtle">选择 Codex CLI 使用本地网关，或直接切换为某个已登录账号。</p>
+          <p className="subtle">选择 Codex 使用本地网关，或直接切换为某个已登录账号。</p>
         </div>
       </div>
       <div className="mode-grid">
@@ -510,7 +510,7 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
         <button type="button" className={`mode-card${mode === "account" ? " active" : ""}${settings.codex_auth_mode === "account" ? " current" : ""}`} onClick={() => setMode("account")}>
           {settings.codex_auth_mode === "account" && <em>当前</em>}
           <strong>账号模式</strong>
-          <span>把选中的 ChatGPT 账号 token 写入 Codex CLI 认证文件。</span>
+          <span>把选中的 ChatGPT 账号 token 写入 Codex 认证文件。</span>
         </button>
       </div>
       {!mode && <div className="empty">当前 Codex 认证状态未知，请选择一种模式后应用。</div>}

@@ -17,7 +17,7 @@ function configPath() {
 function applyGatewayMode(settings) {
   ensureCodexDir();
   const apiKey = String(settings.gateway_api_key || "").trim();
-  if (!apiKey) throw new Error("本地 API Key 为空，无法写入 Codex CLI 认证。");
+  if (!apiKey) throw new Error("本地 API Key 为空，无法写入 Codex 认证。");
   writeJson(authPath(), { OPENAI_API_KEY: apiKey });
   const providerChanged = ensureProviderConfig(settings);
   return {
@@ -32,7 +32,7 @@ function applyAccountMode(account) {
   ensureCodexDir();
   if (!account) throw new Error("请选择一个账号。");
   if (!account.access_token || !account.refresh_token) {
-    throw new Error("账号 token 不完整，无法写入 Codex CLI 认证。");
+    throw new Error("账号 token 不完整，无法写入 Codex 认证。");
   }
   writeJson(authPath(), {
     auth_mode: "chatgpt",
