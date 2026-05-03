@@ -1,0 +1,46 @@
+{
+  "name": "codex-gateway",
+  "version": "0.1.0",
+  "description": "Personal Codex account manager and local gateway.",
+  "license": "MIT",
+  "author": "jadchene",
+  "main": "src/main/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:8435 && electron .\"",
+    "start": "electron .",
+    "build": "vite build",
+    "pack:unpacked": "npm run build && electron-builder --dir",
+    "test": "node --test test/*.test.mjs",
+    "verify": "npm run test && npm run build"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.1",
+    "electron": "^38.0.0",
+    "electron-builder": "^26.8.1",
+    "vite": "^7.1.0",
+    "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "io.github.jadchene.codex-gateway",
+    "productName": "Codex Gateway",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/renderer/**/*",
+      "src/main/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "dir"
+      ]
+    }
+  }
+}

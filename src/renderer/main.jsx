@@ -1,0 +1,718 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import "./styles.css";
+
+const pages = [
+  { id: "dashboard", label: "仪表盘" },
+  { id: "accounts", label: "账号管理" },
+  { id: "auth", label: "认证管理" },
+  { id: "gateway", label: "网关服务" },
+  { id: "logs", label: "调用记录" },
+  { id: "appLogs", label: "运行日志" },
+  { id: "settings", label: "应用配置" }
+];
+
+function App() {
+  const api = window.codexGateway;
+  const [page, setPage] = useState("dashboard");
+  const [ready, setReady] = useState(false);
+  const [settings, setSettings] = useState({});
+  const [accounts, setAccounts] = useState([]);
+  const [tokenLogs, setTokenLogs] = useState({ items: [], total: 0, page: 1, pageSize: 20 });
+  const [tokenSummary, setTokenSummary] = useState({ total: {}, byAccount: [] });
+  const [appLogs, setAppLogs] = useState({ items: [], total: 0, page: 1, pageSize: 20 });
+  const [gateway, setGateway] = useState({ running: false, url: "" });
+  const [paths, setPaths] = useState({});
+  const [message, setMessage] = useState("");
+  const [loginId, setLoginId] = useState("");
+  const [refreshingIds, setRefreshingIds] = useState(() => new Set());
+  const [retryIds, setRetryIds] = useState(() => new Set());
+
+  async function reload() {
+    const data = await api.bootstrap();
+    setSettings(data.settings);
+    setAccounts(data.accounts);
+    setTokenLogs(data.tokenLogs);
+    setTokenSummary(data.tokenSummary || { total: {}, byAccount: [] });
+    setAppLogs(data.appLogs);
+    setGateway(data.gateway);
+    setPaths(data.paths);
+    setReady(true);
+  }
+
+  useEffect(() => {
+    reload().catch((error) => setMessage(error.message));
+  }, []);
+
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = setTimeout(() => setMessage(""), 2000);
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  useEffect(() => {
+    if (!loginId) return undefined;
+    const timer = setInterval(async () => {
+      const status = await api.loginStatus(loginId);
+      if (status.status === "success") {
+        clearInterval(timer);
+        setLoginId("");
+        await reload();
+        setMessage("登录成功，账号已保存");
+      }
+      if (status.status === "failed") {
+        clearInterval(timer);
+        setLoginId("");
+        setMessage(`登录失败：${status.error || "未知错误"}`);
+      }
+    }, 1800);
+    return () => clearInterval(timer);
+  }, [loginId]);
+
+  const activeAccounts = useMemo(() => accounts.filter((item) => item.enabled && item.status === "active"), [accounts]);
+  const gatewayBase = `${gateway.url || `http://${settings.gateway_host || "localhost"}:${settings.gateway_port || "8436"}`}/v1`;
+
+  async function saveSettings(next) {
+    setSettings(await api.saveSettings(next));
+    setMessage("配置已保存");
+  }
+
+  async function startLogin() {
+    try {
+      const result = await api.startLogin();
+      setLoginId(result.loginId);
+      setMessage("已打开浏览器登录页面，完成授权后会自动保存账号");
+    } catch (error) {
+      setMessage(`启动登录失败：${error.message}`);
+    }
+  }
+
+  async function refreshUsage(account) {
+    setRefreshingIds((prev) => new Set(prev).add(account.id));
+    try {
+      await api.refreshUsage(account.id);
+      setRetryIds((prev) => {
+        const next = new Set(prev);
+        next.delete(account.id);
+        return next;
+      });
+      await reload();
+      setMessage(`${account.name} 额度已刷新`);
+    } catch (error) {
+      setRetryIds((prev) => new Set(prev).add(account.id));
+      setMessage(`刷新失败：${error.message}`);
+    } finally {
+      setRefreshingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(account.id);
+        return next;
+      });
+    }
+  }
+
+  async function refreshAllUsage() {
+    setMessage("正在刷新所有账号额度...");
+    try {
+      await api.refreshAllUsage();
+      await reload();
+      setMessage("所有账号额度刷新完成");
+    } catch (error) {
+      setMessage(`刷新全部失败：${error.message}`);
+    }
+  }
+
+  async function toggleGateway() {
+    const next = gateway.running ? await api.stopGateway() : await api.startGateway();
+    setGateway(next);
+    setMessage(next.running ? "网关已启动" : "网关已停止");
+  }
+
+  async function setAccountEnabled(account, enabled) {
+    await api.setAccountEnabled(account.id, enabled);
+    await reload();
+    setMessage(`${account.name} 已${enabled ? "启用" : "停用"}`);
+  }
+
+  if (!ready) return <div className="boot">正在载入本地数据...</div>;
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div>
+          <div className="brand">Codex Gateway</div>
+          <div className="muted">个人 GPT 账号池与本地网关</div>
+        </div>
+        <nav>
+          {pages.map((item) => (
+            <button key={item.id} className={page === item.id ? "nav-active" : ""} onClick={() => setPage(item.id)}>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <section className="content">
+        {message && <div className="toast" role="status">{message}</div>}
+
+        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} tokenSummary={tokenSummary} />}
+        {page === "accounts" && (
+          <AccountsPage
+            accounts={accounts}
+            loginId={loginId}
+            onStartLogin={startLogin}
+            onCancelLogin={() => {
+              setLoginId("");
+              setMessage("已取消等待授权");
+            }}
+            onRefreshUsage={refreshUsage}
+            onRefreshAll={refreshAllUsage}
+            onSetEnabled={setAccountEnabled}
+            refreshingIds={refreshingIds}
+            retryIds={retryIds}
+            onDelete={async (id) => {
+              if (!window.confirm("确定要删除这个账号吗？删除后需要重新登录授权。")) return;
+              await api.deleteAccount(id);
+              await reload();
+            }}
+          />
+        )}
+        {page === "auth" && (
+          <AuthManagementPage
+            settings={settings}
+            accounts={accounts}
+            gatewayBase={gatewayBase}
+            onMessage={setMessage}
+            onApplyGateway={async () => {
+              const result = await api.applyGatewayAuth();
+              await reload();
+              setMessage(result.providerChanged ? "已写入网关认证，并补充 Codex provider" : "已写入网关认证");
+            }}
+            onApplyAccount={async (accountId) => {
+              const result = await api.applyAccountAuth(accountId);
+              await reload();
+              setMessage(result.providerRemoved ? "已写入账号模式认证，并移除网关 provider" : "已写入账号模式认证");
+            }}
+          />
+        )}
+        {page === "gateway" && <GatewayPage gateway={gateway} gatewayBase={gatewayBase} settings={settings} onToggle={toggleGateway} onMessage={setMessage} />}
+        {page === "settings" && <SettingsPage settings={settings} paths={paths} onSave={saveSettings} />}
+        {page === "logs" && (
+          <CallRecordsPage
+            pageData={tokenLogs}
+            summary={tokenSummary}
+            onQuery={async (query) => {
+              setTokenLogs(await api.listTokenLogs(query));
+              setTokenSummary(await api.tokenSummary(query));
+            }}
+          />
+        )}
+        {page === "appLogs" && (
+          <AppLogsPage
+            pageData={appLogs}
+            onQuery={async (query) => setAppLogs(await api.listAppLogs(query))}
+          />
+        )}
+      </section>
+    </main>
+  );
+}
+
+function Dashboard({ accounts, gateway, tokenSummary }) {
+  const usable = accounts.filter((item) => item.enabled && item.status === "active" && item.access_token).length;
+  const total = tokenSummary?.total || {};
+  return (
+    <section className="panel">
+      <div className="section-title">
+        <div>
+          <h2>运行概览</h2>
+          <p className="subtle">查看账号池、本地网关和今天的调用用量。</p>
+        </div>
+      </div>
+      <div className="dashboard-grid">
+        <Metric title="可用账号" value={`${usable}/${accounts.length}`} />
+        <Metric title="网关状态" value={gateway.running ? "运行中" : "未启动"} />
+      </div>
+      <div className="divider-title">今日网关数据统计</div>
+      <div className="dashboard-grid">
+        <Metric title="调用次数" value={total.calls || 0} />
+        <Metric title="总 Token" value={total.total_tokens || 0} />
+        <Metric title="输入 Token" value={total.input_tokens || 0} />
+        <Metric title="缓存 Token" value={total.cached_input_tokens || 0} />
+        <Metric title="输出 Token" value={total.output_tokens || 0} />
+      </div>
+    </section>
+  );
+}
+
+function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin, onCancelLogin, onRefreshUsage, onRefreshAll, onSetEnabled, onDelete }) {
+  return (
+    <section className="panel">
+      <div className="section-title">
+        <div>
+          <h2>GPT 账号</h2>
+          <p className="subtle">通过浏览器授权登录，应用自动保存 token 到本地 SQLite。</p>
+        </div>
+        <div className="actions-inline">
+          <button className="primary" onClick={onStartLogin} disabled={Boolean(loginId)}>{loginId ? "等待授权..." : "浏览器登录"}</button>
+          <button onClick={onRefreshAll}>刷新全部额度</button>
+          {loginId && <button onClick={onCancelLogin}>取消</button>}
+        </div>
+      </div>
+      <div className="account-grid">
+        {accounts.map((account) => (
+          <article className="account-card" key={account.id}>
+            <div className="account-head">
+              <div>
+                <h3>{account.name}</h3>
+                <p>{account.email || account.account_id || "未读取到账户标识"}</p>
+              </div>
+              <span className={account.enabled ? "pill ok" : "pill"}>{account.enabled ? "启用" : "停用"}</span>
+            </div>
+            <Quota label="5 小时" value={account.quota_5h_used_percent} resetAt={account.quota_5h_reset_at} />
+            <Quota label="7 天" value={account.quota_7d_used_percent} resetAt={account.quota_7d_reset_at} />
+            <div className="meta-row"><span>套餐</span><b>{account.subscription_plan || "未知"}</b></div>
+            <div className="meta-row"><span>订阅期限</span><b>{formatTime(account.subscription_expires_at)}</b></div>
+            <div className="card-actions">
+              <button onClick={() => onSetEnabled(account, !account.enabled)}>
+                {account.enabled ? "停用" : "启用"}
+              </button>
+              <button onClick={() => onRefreshUsage(account)} disabled={refreshingIds.has(account.id)}>
+                {refreshingIds.has(account.id) ? "刷新中..." : retryIds.has(account.id) ? "重试刷新" : "刷新额度"}
+              </button>
+              <button className="danger ghost" onClick={() => onDelete(account.id)}>删除</button>
+            </div>
+          </article>
+        ))}
+        {accounts.length === 0 && <div className="empty">还没有账号。点击“浏览器登录”完成 ChatGPT/Codex 授权。</div>}
+      </div>
+    </section>
+  );
+}
+
+function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onApplyGateway, onApplyAccount }) {
+  const savedAccountId = settings.codex_auth_mode === "account" ? settings.codex_selected_account_id || "" : "";
+  const [mode, setMode] = useState(normalizeAuthMode(settings.codex_auth_mode));
+  const [accountId, setAccountId] = useState(savedAccountId);
+  const [busy, setBusy] = useState(false);
+  const selectedAccount = accounts.find((account) => account.id === accountId);
+  const alreadyApplied = mode === "gateway"
+    ? settings.codex_auth_mode === "gateway"
+    : mode === "account" && settings.codex_auth_mode === "account" && settings.codex_selected_account_id === accountId;
+
+  useEffect(() => {
+    setMode(normalizeAuthMode(settings.codex_auth_mode));
+    setAccountId(settings.codex_auth_mode === "account" ? settings.codex_selected_account_id || "" : "");
+  }, [settings]);
+
+  async function apply() {
+    setBusy(true);
+    try {
+      if (mode === "gateway") await onApplyGateway();
+      else if (mode === "account") await onApplyAccount(accountId);
+    } catch (error) {
+      onMessage(`写入失败：${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel form-panel">
+      <div className="section-title">
+        <div>
+          <h2>认证管理</h2>
+          <p className="subtle">选择 Codex CLI 使用本地网关，或直接切换为某个已登录账号。</p>
+        </div>
+      </div>
+      <div className="mode-grid">
+        <button type="button" className={`mode-card${mode === "gateway" ? " active" : ""}${settings.codex_auth_mode === "gateway" ? " current" : ""}`} onClick={() => setMode("gateway")}>
+          {settings.codex_auth_mode === "gateway" && <em>当前</em>}
+          <strong>网关模式</strong>
+          <span>写入本地 API Key，并在缺少 provider 时补充 Codex Gateway 配置。</span>
+        </button>
+        <button type="button" className={`mode-card${mode === "account" ? " active" : ""}${settings.codex_auth_mode === "account" ? " current" : ""}`} onClick={() => setMode("account")}>
+          {settings.codex_auth_mode === "account" && <em>当前</em>}
+          <strong>账号模式</strong>
+          <span>把选中的 ChatGPT 账号 token 写入 Codex CLI 认证文件。</span>
+        </button>
+      </div>
+      {!mode && <div className="empty">当前 Codex 认证状态未知，请选择一种模式后应用。</div>}
+      {mode === "gateway" && (
+        <div className="auth-preview-grid">
+          <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: settings.gateway_api_key || "" }, null, 2)} />
+          <CodePreview title="config.toml provider" value={providerToml(settings)} />
+        </div>
+      )}
+      {mode === "account" && (
+        <div className="account-picker">
+          {accounts.map((account) => (
+            <button
+              type="button"
+              key={account.id}
+              className={`${accountId === account.id ? "picker-option active" : "picker-option"}${settings.codex_auth_mode === "account" && settings.codex_selected_account_id === account.id ? " current" : ""}${account.enabled ? "" : " disabled"}`}
+              onClick={() => setAccountId(account.id)}
+              disabled={!account.enabled}
+            >
+              {settings.codex_auth_mode === "account" && settings.codex_selected_account_id === account.id && <small>当前</small>}
+              <strong>{account.email || "未读取邮箱"}</strong>
+              <span className="account-option-meta">
+                <em className="account-state">{account.enabled ? "启用" : "停用"}</em>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {mode === "account" && accounts.length === 0 && <div className="empty">还没有账号，请先到账号管理完成浏览器登录。</div>}
+      {!alreadyApplied && (
+        <div className="actions-inline">
+          <button className="primary" type="button" onClick={apply} disabled={busy || !mode || (mode === "account" && (!accountId || !selectedAccount?.enabled))}>
+            {busy ? "写入中..." : "应用到 Codex"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function GatewayPage({ gateway, gatewayBase, settings, onToggle, onMessage }) {
+  async function copy(value) {
+    try {
+      await navigator.clipboard.writeText(value || "");
+      onMessage("复制成功");
+    } catch (error) {
+      onMessage(`复制失败：${error.message}`);
+    }
+  }
+
+  return (
+    <section className="panel form-panel">
+      <h2>网关服务</h2>
+      <div className="gateway-status">
+        <span className={gateway.running ? "status-dot on" : "status-dot"} />
+        <strong>{gateway.running ? "运行中" : "已停止"}</strong>
+      </div>
+      <div>
+        <button className={gateway.running ? "danger" : "primary"} onClick={onToggle}>{gateway.running ? "停止网关" : "启动网关"}</button>
+      </div>
+      <div className="info-box">
+        <InfoRow label="Base URL" value={gatewayBase} onCopy={() => copy(gatewayBase)} />
+        <InfoRow label="API Key" value={settings.gateway_api_key} onCopy={() => copy(settings.gateway_api_key)} />
+        <InfoRow label="上游地址" value={settings.upstream_base_url} />
+      </div>
+    </section>
+  );
+}
+
+function SettingsPage({ settings, paths, onSave }) {
+  const [draft, setDraft] = useState(settings);
+  const [showKey, setShowKey] = useState(false);
+
+  useEffect(() => {
+    setDraft(settings);
+  }, [settings]);
+
+  function setField(key, value) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    await onSave(draft);
+  }
+
+  async function copyKey() {
+    await navigator.clipboard.writeText(draft.gateway_api_key || "");
+  }
+
+  return (
+    <form className="panel form-panel" onSubmit={submit}>
+      <h2>应用配置</h2>
+      <div className="split">
+        <ControlledField name="gateway_host" label="监听地址" value={draft.gateway_host} onChange={setField} />
+        <ControlledField name="gateway_port" label="端口" value={draft.gateway_port} type="number" onChange={setField} />
+      </div>
+      <label className="field">
+        <span>本地 API Key</span>
+        <div className="input-actions">
+          <input
+            name="gateway_api_key"
+            value={draft.gateway_api_key || ""}
+            type={showKey ? "text" : "password"}
+            onChange={(event) => setField("gateway_api_key", event.target.value)}
+          />
+          <button type="button" onClick={() => setField("gateway_api_key", generateApiKey())}>重新生成</button>
+          <button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "隐藏" : "查看"}</button>
+          <button type="button" onClick={copyKey}>复制</button>
+        </div>
+      </label>
+      <ControlledField name="upstream_base_url" label="上游地址" value={draft.upstream_base_url} onChange={setField} />
+      <ControlledField name="request_timeout_ms" label="请求超时 ms（0 为不限制）" value={draft.request_timeout_ms} type="number" onChange={setField} />
+      <ControlledField name="usage_refresh_interval_secs" label="账号额度定时刷新间隔（秒，0 为关闭）" value={draft.usage_refresh_interval_secs} type="number" onChange={setField} />
+      <label className="setting-toggle">
+        <span>
+          <strong>自动启动网关</strong>
+          <small>应用打开后自动监听本地网关端口。</small>
+        </span>
+        <input
+          type="checkbox"
+          checked={draft.auto_start_gateway === "true"}
+          onChange={(event) => setField("auto_start_gateway", event.target.checked ? "true" : "false")}
+        />
+      </label>
+      <div>
+        <button className="primary" type="submit">保存配置</button>
+      </div>
+      <div className="info-box">
+        <InfoRow label="数据目录" value={paths.dataDir} />
+        <InfoRow label="SQLite" value={paths.dbPath} />
+      </div>
+    </form>
+  );
+}
+
+function InfoRow({ label, value, onCopy }) {
+  return (
+    <div className="info-row">
+      <span>{label}</span>
+      <code>{value || "-"}</code>
+      {onCopy && <button type="button" onClick={onCopy}>复制</button>}
+    </div>
+  );
+}
+
+function CodePreview({ title, value }) {
+  return (
+    <div className="code-preview">
+      <div>{title}</div>
+      <pre>{value}</pre>
+    </div>
+  );
+}
+
+function CallRecordsPage({ pageData, summary, onQuery }) {
+  const { query, setField, search, setPageSize, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
+  return (
+    <section className="panel">
+      <div className="section-title">
+        <div>
+          <h2>调用记录</h2>
+          <p className="subtle">只记录网关调用产生的 token 使用情况，默认查询今天。</p>
+        </div>
+      </div>
+      <LogFilters query={query} setField={setField} onSearch={search} />
+      {summary?.byAccount?.length > 0 && (
+        <div className="summary-list">
+          {summary.byAccount.map((item) => (
+            <div className="summary-row" key={item.account_id || "none"}>
+              <span>{item.account_name}</span>
+              <b>{item.total_tokens} token</b>
+              <small>输入 {item.input_tokens} / 缓存 {item.cached_input_tokens} / 输出 {item.output_tokens}</small>
+            </div>
+          ))}
+        </div>
+      )}
+      <table>
+        <thead><tr><th>时间</th><th>账号</th><th>路径</th><th>状态</th><th>耗时</th><th>输入</th><th>缓存</th><th>输出</th><th>总计</th></tr></thead>
+        <tbody>
+          {pageData.items.map((log) => (
+            <tr key={log.id}>
+              <td>{formatTime(log.created_at)}</td>
+              <td>{log.account_name || log.account_id || "-"}</td>
+              <td>{log.path}</td>
+              <td>{log.status || "-"}</td>
+              <td>{log.duration_ms ? `${log.duration_ms} ms` : "-"}</td>
+              <td>{log.input_tokens || 0}</td>
+              <td>{log.cached_input_tokens || 0}</td>
+              <td>{log.output_tokens || 0}</td>
+              <td>{log.total_tokens || 0}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Pager pageData={pageData} query={query} onPageSize={setPageSize} onPrev={prevPage} onNext={nextPage} />
+    </section>
+  );
+}
+
+function AppLogsPage({ pageData, onQuery }) {
+  const { query, setField, search, setPageSize, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
+  return (
+    <section className="panel">
+      <div className="section-title">
+        <div>
+          <h2>运行日志</h2>
+          <p className="subtle">记录应用运行情况，例如刷新账号、启停网关、认证写入和异常。</p>
+        </div>
+      </div>
+      <LogFilters query={query} setField={setField} onSearch={search} />
+      <table>
+        <thead><tr><th>时间</th><th>级别</th><th>模块</th><th>动作</th><th>状态</th><th>消息</th></tr></thead>
+        <tbody>
+          {pageData.items.map((log) => (
+            <tr key={log.id}>
+              <td>{formatTime(log.created_at)}</td>
+              <td>{log.level}</td>
+              <td>{log.scope || "-"}</td>
+              <td>{log.action || "-"}</td>
+              <td>{log.status || "-"}</td>
+              <td>{log.message || ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Pager pageData={pageData} query={query} onPageSize={setPageSize} onPrev={prevPage} onNext={nextPage} />
+    </section>
+  );
+}
+
+function LogFilters({ query, setField, onSearch }) {
+  return (
+    <div className="filter-row">
+      <label className="field">
+        <span>开始日期</span>
+        <input type="date" value={query.startDate} onChange={(event) => setField("startDate", event.target.value)} />
+      </label>
+      <label className="field">
+        <span>结束日期</span>
+        <input type="date" value={query.endDate} onChange={(event) => setField("endDate", event.target.value)} />
+      </label>
+      <div className="filter-action">
+        <span>操作</span>
+        <button type="button" className="primary" onClick={onSearch}>查询</button>
+      </div>
+    </div>
+  );
+}
+
+function Pager({ pageData, query, onPageSize, onPrev, onNext }) {
+  const totalPages = Math.max(1, Math.ceil((pageData.total || 0) / (pageData.pageSize || 20)));
+  return (
+    <div className="pager">
+      <span>共 {pageData.total || 0} 条，第 {pageData.page || 1}/{totalPages} 页</span>
+      <div className="actions-inline">
+        <label className="page-size">
+          <span>每页</span>
+          <input type="number" min="5" max="200" value={query.pageSize} onChange={(event) => onPageSize(event.target.value)} />
+        </label>
+        <button onClick={onPrev} disabled={(pageData.page || 1) <= 1}>上一页</button>
+        <button onClick={onNext} disabled={(pageData.page || 1) >= totalPages}>下一页</button>
+      </div>
+    </div>
+  );
+}
+
+function usePagedQuery(onQuery, pageData) {
+  const [query, setQuery] = useState(() => todayQuery(pageData.pageSize || 20));
+  function setField(key, value) {
+    setQuery((prev) => ({ ...prev, [key]: value }));
+  }
+  async function run(page = 1) {
+    const next = { ...query, page };
+    setQuery(next);
+    await onQuery(toLogQuery(next));
+  }
+  return {
+    query,
+    setField,
+    search: () => run(1),
+    setPageSize: async (pageSize) => {
+      const next = { ...query, page: 1, pageSize };
+      setQuery(next);
+      await onQuery(toLogQuery(next));
+    },
+    nextPage: () => run((pageData.page || 1) + 1),
+    prevPage: () => run(Math.max(1, (pageData.page || 1) - 1))
+  };
+}
+
+function Metric({ title, value }) {
+  return <article className="panel metric"><span>{title}</span><strong>{value}</strong></article>;
+}
+
+function Field({ label, name, value, type = "text", secret }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input name={name} defaultValue={value ?? ""} type={secret ? "password" : type} />
+    </label>
+  );
+}
+
+function ControlledField({ label, name, value, type = "text", onChange }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input name={name} value={value ?? ""} type={type} onChange={(event) => onChange(name, event.target.value)} />
+    </label>
+  );
+}
+
+function Quota({ label, value, resetAt }) {
+  const usedPercent = Math.max(0, Math.min(100, Number(value || 0)));
+  const remainingPercent = Math.max(0, Math.min(100, 100 - usedPercent));
+  return (
+    <div className="quota">
+      <div><span>{label}</span><b>剩余 {remainingPercent.toFixed(1)}%</b></div>
+      <div className="bar"><span style={{ width: `${remainingPercent}%` }} /></div>
+      <small>已用 {usedPercent.toFixed(1)}% · 重置：{formatTime(resetAt)}</small>
+    </div>
+  );
+}
+
+function formatTime(value) {
+  if (!value) return "未填写";
+  if (typeof value === "string" && Number.isNaN(Number(value))) return value;
+  const date = new Date(Number(value) * 1000);
+  if (Number.isNaN(date.getTime())) return "未填写";
+  return date.toLocaleString();
+}
+
+function generateApiKey() {
+  const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(48));
+  return `sk-${Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")}`;
+}
+
+function normalizeAuthMode(value) {
+  return value === "gateway" || value === "account" ? value : "";
+}
+
+function providerToml(settings) {
+  const host = settings.gateway_host || "localhost";
+  const port = settings.gateway_port || "8436";
+  return [
+    'model_provider = "codex_gateway"',
+    "",
+    "[model_providers.codex_gateway]",
+    'name = "Codex Gateway"',
+    `base_url = "http://${host}:${port}/v1"`,
+    'wire_api = "responses"'
+  ].join("\n");
+}
+
+function todayQuery(pageSize = 20) {
+  const today = new Date();
+  const value = toDateInput(today);
+  return { startDate: value, endDate: value, page: 1, pageSize };
+}
+
+function toLogQuery(query) {
+  const start = new Date(`${query.startDate}T00:00:00`);
+  const end = new Date(`${query.endDate || query.startDate}T00:00:00`);
+  end.setDate(end.getDate() + 1);
+  return {
+    page: Number(query.page || 1),
+    pageSize: Number(query.pageSize || 20),
+    startAt: Math.floor(start.getTime() / 1000),
+    endAt: Math.floor(end.getTime() / 1000)
+  };
+}
+
+function toDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+createRoot(document.getElementById("root")).render(<App />);
