@@ -59,6 +59,7 @@ app.whenReady().then(async () => {
   gateway = createGateway(store, authService, { refreshAllUsage, refreshAccountToken: refreshGatewayAccountToken });
   registerIpc();
   scheduleUsageRefresh("startup");
+  checkStaleQuotasOnStartup();
   if (store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
       store.addAppLog({ scope: "gateway", action: "auto-start", status: "success", message: "应用启动时自动启动网关" });
@@ -589,6 +590,38 @@ function scheduleUsageRefresh(reason = "settings-save") {
     status: reason,
     message: `启动账号额度定时刷新任务：每 ${effectiveIntervalSecs} 秒`
   });
+}
+
+function checkStaleQuotasOnStartup() {
+  const now = Math.floor(Date.now() / 1000);
+  const accounts = store.listAccounts().filter((account) => account.enabled && account.access_token);
+  for (const account of accounts) {
+    const fiveHourUsed = Number(account.quota_5h_used_percent || 0);
+    const sevenDayUsed = Number(account.quota_7d_used_percent || 0);
+    const fiveHourResetAt = Number(account.quota_5h_reset_at || 0);
+    const sevenDayResetAt = Number(account.quota_7d_reset_at || 0);
+
+    const fiveHourStale = fiveHourUsed >= 100 && fiveHourResetAt > 0 && fiveHourResetAt < now;
+    const sevenDayStale = sevenDayUsed >= 100 && sevenDayResetAt > 0 && sevenDayResetAt < now;
+
+    if (fiveHourStale || sevenDayStale) {
+      store.addAppLog({
+        scope: "usage",
+        action: "startup-stale-refresh",
+        status: "start",
+        message: `启动时检测到账号额度已过重置时间，开始自动刷新：${account.email || account.name || account.id}`
+      });
+      refreshUsage(account.id).catch((error) => {
+        store.addAppLog({
+          level: "error",
+          scope: "usage",
+          action: "startup-stale-refresh",
+          status: "failed",
+          message: `启动时自动刷新过期账号额度失败：${account.email || account.name || account.id}: ${compactError(error.message)}`
+        });
+      });
+    }
+  }
 }
 
 async function refreshUsage(id) {
