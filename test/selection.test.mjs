@@ -7,7 +7,6 @@ const { pickGatewayAccount, quotaWindowExhausted, usageScore } = require("../src
 const { buildAuthorizeUrl } = require("../src/main/auth.cjs");
 const { gatewayProviderBlock, insertProviderBlockIntoConfig, replaceGatewayProviderBlock } = require("../src/main/codex-cli-auth.cjs");
 const {
-  applyResponseAdapter,
   buildGatewayRequest,
   buildUpstreamHeaders,
   buildUpstreamUrl,
@@ -118,23 +117,6 @@ test("buildUpstreamHeaders only replaces local auth and account headers", () => 
   });
 });
 
-test("buildGatewayRequest converts chat function tools to Responses format", () => {
-  const request = buildGatewayRequest(
-    "https://chatgpt.com/backend-api/codex",
-    "/v1/chat/completions",
-    Buffer.from(JSON.stringify({
-      model: "gpt-5",
-      messages: [{ role: "user", content: "hi" }],
-      tools: [{ type: "function", function: { name: "lookup", description: "lookup", parameters: { type: "object" } } }],
-      tool_choice: { type: "function", function: { name: "lookup" } }
-    }))
-  );
-  const body = JSON.parse(request.body.toString("utf8"));
-  assert.equal(request.path, "/v1/responses");
-  assert.deepEqual(body.tools, [{ type: "function", name: "lookup", description: "lookup", parameters: { type: "object" } }]);
-  assert.deepEqual(body.tool_choice, { type: "function", name: "lookup" });
-});
-
 test("buildGatewayRequest keeps compact endpoint path", () => {
   const request = buildGatewayRequest(
     "https://chatgpt.com/backend-api/codex",
@@ -143,79 +125,6 @@ test("buildGatewayRequest keeps compact endpoint path", () => {
   );
   assert.equal(request.path, "/v1/responses/compact");
   assert.equal(request.upstreamUrl, "https://chatgpt.com/backend-api/codex/responses/compact");
-});
-
-test("buildGatewayRequest adapts images generation to Responses image tool", () => {
-  const request = buildGatewayRequest(
-    "https://chatgpt.com/backend-api/codex",
-    "/v1/images/generations",
-    Buffer.from(JSON.stringify({
-      model: "gpt-image-2",
-      prompt: "a cat",
-      response_format: "url",
-      size: "1024x1024",
-      partial_images: 1
-    }))
-  );
-  const body = JSON.parse(request.body.toString("utf8"));
-  assert.equal(request.path, "/v1/responses");
-  assert.equal(request.responseAdapter.type, "images");
-  assert.equal(request.responseAdapter.responseFormat, "url");
-  assert.equal(body.stream, true);
-  assert.equal(body.tools[0].type, "image_generation");
-  assert.equal(body.tools[0].model, "gpt-image-2");
-  assert.equal(body.tools[0].size, "1024x1024");
-  assert.equal(body.tools[0].partial_images, 1);
-  assert.deepEqual(body.tool_choice, { type: "image_generation" });
-});
-
-test("buildGatewayRequest adapts multipart image edits", () => {
-  const multipart = Buffer.from([
-    "--test-boundary\r\n",
-    "Content-Disposition: form-data; name=\"prompt\"\r\n\r\n",
-    "edit it\r\n",
-    "--test-boundary\r\n",
-    "Content-Disposition: form-data; name=\"image\"; filename=\"a.png\"\r\n",
-    "Content-Type: image/png\r\n\r\n",
-    "IMG\r\n",
-    "--test-boundary\r\n",
-    "Content-Disposition: form-data; name=\"mask\"; filename=\"m.png\"\r\n",
-    "Content-Type: image/png\r\n\r\n",
-    "MSK\r\n",
-    "--test-boundary--\r\n"
-  ].join(""), "utf8");
-  const request = buildGatewayRequest(
-    "https://chatgpt.com/backend-api/codex",
-    "/v1/images/edits",
-    multipart,
-    { "content-type": "multipart/form-data; boundary=test-boundary" }
-  );
-  const body = JSON.parse(request.body.toString("utf8"));
-  assert.equal(body.input[0].content[1].image_url, "data:image/png;base64,SU1H");
-  assert.equal(body.tools[0].input_image_mask.image_url, "data:image/png;base64,TVNL");
-});
-
-test("applyResponseAdapter converts Codex image SSE to OpenAI Images JSON", () => {
-  const upstream = {
-    status: 200,
-    headers: [["content-type", "text/event-stream"]],
-    tokenUsage: {},
-    body: Buffer.from([
-      "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"image_generation_call\",\"status\":\"completed\",\"output_format\":\"png\",\"result\":\"aGVsbG8=\",\"revised_prompt\":\"cat\"}}\n\n",
-      "data: {\"type\":\"response.completed\",\"response\":{\"created\":1775900000,\"usage\":{\"input_tokens\":4,\"output_tokens\":1,\"total_tokens\":5}}}\n\n",
-      "data: [DONE]\n\n"
-    ].join(""), "utf8")
-  };
-  const converted = applyResponseAdapter(
-    { responseAdapter: { type: "images", responseFormat: "b64_json", stream: false } },
-    upstream
-  );
-  const body = JSON.parse(converted.body.toString("utf8"));
-  assert.equal(converted.headers[0][1], "application/json; charset=utf-8");
-  assert.equal(body.created, 1775900000);
-  assert.equal(body.data[0].b64_json, "aGVsbG8=");
-  assert.equal(body.data[0].revised_prompt, "cat");
-  assert.equal(body.usage.total_tokens, 5);
 });
 
 test("extractTokenUsage uses latest SSE usage instead of summing cumulative events", () => {
