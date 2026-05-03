@@ -29,11 +29,9 @@ function normalizeUsagePayload(payload) {
 
   if (isLimitReached) {
     fiveHourUsed = 100;
-    sevenDayUsed = 100;
-  } else {
-    if (fiveHourUsed >= 99) fiveHourUsed = 100;
-    if (sevenDayUsed >= 99) sevenDayUsed = 100;
   }
+  if (fiveHourUsed >= 99) fiveHourUsed = 100;
+  if (sevenDayUsed >= 99) sevenDayUsed = 100;
 
   return {
     quota_5h_used_percent: fiveHourUsed,

@@ -11,6 +11,7 @@ const {
   buildGatewayRequest,
   buildUpstreamHeaders,
   buildUpstreamUrl,
+  extractTokenUsage,
   isAuthExpiredResponse,
   isQuotaExhaustedResponse
 } = require("../src/main/gateway.cjs");
@@ -215,6 +216,18 @@ test("applyResponseAdapter converts Codex image SSE to OpenAI Images JSON", () =
   assert.equal(body.data[0].b64_json, "aGVsbG8=");
   assert.equal(body.data[0].revised_prompt, "cat");
   assert.equal(body.usage.total_tokens, 5);
+});
+
+test("extractTokenUsage uses latest SSE usage instead of summing cumulative events", () => {
+  const usage = extractTokenUsage(Buffer.from([
+    "data: {\"type\":\"response.in_progress\",\"response\":{\"usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":10,\"total_tokens\":1010}}}\n\n",
+    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1200,\"cached_input_tokens\":900,\"output_tokens\":20,\"total_tokens\":1220}}}\n\n",
+    "data: [DONE]\n\n"
+  ].join(""), "utf8"));
+  assert.equal(usage.input_tokens, 1200);
+  assert.equal(usage.cached_input_tokens, 900);
+  assert.equal(usage.output_tokens, 20);
+  assert.equal(usage.total_tokens, 1220);
 });
 
 test("isQuotaExhaustedResponse detects quota and rate limit failures", () => {

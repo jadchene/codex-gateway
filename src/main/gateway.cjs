@@ -46,9 +46,6 @@ async function handleRequest(req, res, store, authService, hooks) {
   if (req.method === "GET" && pathname === "/auth/callback") {
     return handleAuthCallback(parsedUrl, res, authService);
   }
-  if (req.method === "GET" && pathname === "/health") {
-    return handleHealth(req, res, store, settings, hooks);
-  }
   if (!pathname.startsWith("/v1/")) {
     return sendJson(res, 404, { error: { message: "Only /v1/* gateway routes are supported." } });
   }
@@ -72,6 +69,8 @@ async function handleRequest(req, res, store, authService, hooks) {
       method: req.method,
       request_path: request.originalPath,
       upstream_path: pathFromUrl(request.upstreamUrl),
+      session_id: headerValue(req.headers.session_id),
+      version: headerValue(req.headers.version),
       status: result.status,
       duration_ms: Date.now() - started,
       ...result.tokenUsage,
@@ -90,38 +89,9 @@ async function handleRequest(req, res, store, authService, hooks) {
   }
 }
 
-async function handleHealth(req, res, store, settings, hooks) {
-  const account = pickGatewayAccount(store.listAccounts());
-  if (!account) {
-    return sendJson(res, 503, { ok: false, error: "No enabled GPT account with an access token is available." });
-  }
-  try {
-    const request = {
-      path: "/v1/models",
-      upstreamUrl: buildUpstreamUrl(settings.upstream_base_url, "/v1/models"),
-      body: Buffer.alloc(0)
-    };
-    const { result } = await callWithFailover(
-      { method: "GET", headers: { accept: "application/json" } },
-      request,
-      account,
-      settings,
-      store,
-      hooks
-    );
-    if (result.status >= 200 && result.status < 300) {
-      return sendJson(res, 200, { ok: true, upstream_status: result.status });
-    }
-    res.statusCode = result.status;
-    for (const [key, value] of result.headers) {
-      if (!["content-encoding", "content-length", "transfer-encoding", "connection"].includes(key.toLowerCase())) {
-        res.setHeader(key, value);
-      }
-    }
-    return res.end(result.body);
-  } catch (error) {
-    return sendJson(res, 502, { ok: false, error: String(error?.message || error) });
-  }
+function headerValue(value) {
+  if (Array.isArray(value)) return value[0] || "";
+  return value ? String(value) : "";
 }
 
 async function callWithFailover(req, request, firstAccount, settings, store, hooks) {
@@ -658,16 +628,16 @@ function parseUsageJson(text) {
 }
 
 function parseUsageSse(text) {
-  const total = emptyUsage();
+  let latest = emptyUsage();
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) continue;
     const payload = trimmed.slice(5).trim();
     if (!payload || payload === "[DONE]") continue;
     const usage = parseUsageJson(payload);
-    if (hasUsage(usage)) mergeUsage(total, usage);
+    if (hasUsage(usage)) latest = usage;
   }
-  return total;
+  return latest;
 }
 
 function usageFromObject(value) {
@@ -832,6 +802,7 @@ module.exports = {
   buildUpstreamUrl,
   buildUpstreamHeaders,
   buildGatewayRequest,
+  extractTokenUsage,
   isQuotaExhaustedResponse,
   isAuthExpiredResponse
 };

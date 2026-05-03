@@ -28,3 +28,28 @@ test("normalizeUsagePayload extracts 5h and 7d quota windows", () => {
   assert.equal(usage.quota_5h_reset_at, 100);
   assert.equal(usage.quota_7d_reset_at, 200);
 });
+
+test("normalizeUsagePayload does not exhaust 7d quota for rate_limit limit_reached", () => {
+  const usage = normalizeUsagePayload({
+    usage: {
+      rate_limit: {
+        limit_reached: true,
+        primary_window: { limit_window_seconds: 18000, used: 4, limit: 4, reset_at: 100 },
+        secondary_window: { limit_window_seconds: 604800, used: 1, limit: 4, reset_at: 200 }
+      }
+    }
+  });
+  assert.equal(usage.quota_5h_used_percent, 100);
+  assert.equal(usage.quota_7d_used_percent, 25);
+});
+
+test("normalizeUsagePayload rounds both quota windows at 99 percent", () => {
+  const usage = normalizeUsagePayload({
+    usage: {
+      "5h": { used_percent: 99 },
+      "7d": { used_percent: 99.5 }
+    }
+  });
+  assert.equal(usage.quota_5h_used_percent, 100);
+  assert.equal(usage.quota_7d_used_percent, 100);
+});

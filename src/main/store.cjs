@@ -28,9 +28,11 @@ function createStore() {
     updateLoginSession: (id, status, error) => updateLoginSession(db, id, status, error),
     listTokenLogs: (query) => listTokenLogs(db, query),
     addTokenLog: (entry) => addTokenLog(db, entry),
+    clearTokenLogs: () => clearTokenLogs(db),
     tokenSummary: (query) => tokenSummary(db, query),
     listAppLogs: (query) => listAppLogs(db, query),
-    addAppLog: (entry) => addAppLog(db, entry)
+    addAppLog: (entry) => addAppLog(db, entry),
+    clearAppLogs: () => clearAppLogs(db)
   };
 }
 
@@ -70,6 +72,8 @@ function migrate(db) {
       method TEXT NOT NULL,
       request_path TEXT,
       upstream_path TEXT,
+      session_id TEXT,
+      version TEXT,
       status INTEGER,
       duration_ms INTEGER,
       input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -104,6 +108,8 @@ function migrate(db) {
   addColumnIfMissing(db, "request_logs", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "request_logs", "request_path", "TEXT");
   addColumnIfMissing(db, "request_logs", "upstream_path", "TEXT");
+  addColumnIfMissing(db, "request_logs", "session_id", "TEXT");
+  addColumnIfMissing(db, "request_logs", "version", "TEXT");
   dropColumnIfExists(db, "request_logs", "path");
   addColumnIfMissing(db, "request_logs", "cached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "request_logs", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
@@ -276,12 +282,12 @@ function addTokenLog(db, entry) {
   if (!hasTokenUsage(entry)) return;
   db.prepare(`
     INSERT INTO request_logs (
-      account_id, method, request_path, upstream_path, status, duration_ms,
+      account_id, method, request_path, upstream_path, session_id, version, status, duration_ms,
       input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
       message, created_at
     )
     VALUES (
-      @account_id, @method, @request_path, @upstream_path, @status, @duration_ms,
+      @account_id, @method, @request_path, @upstream_path, @session_id, @version, @status, @duration_ms,
       @input_tokens, @cached_input_tokens, @output_tokens, @reasoning_output_tokens, @total_tokens,
       @message, @created_at
     )
@@ -290,6 +296,8 @@ function addTokenLog(db, entry) {
     method: entry.method || "GET",
     request_path: entry.request_path || null,
     upstream_path: entry.upstream_path || null,
+    session_id: entry.session_id || null,
+    version: entry.version || null,
     status: entry.status || null,
     duration_ms: entry.duration_ms || null,
     input_tokens: toInt(entry.input_tokens),
@@ -302,28 +310,34 @@ function addTokenLog(db, entry) {
   });
 }
 
+function clearTokenLogs(db) {
+  const result = db.prepare("DELETE FROM request_logs").run();
+  return { deleted: Number(result.changes || 0) };
+}
+
 function listTokenLogs(db, query) {
   const range = normalizeLogQuery(query);
+  const filter = tokenLogFilter(range);
   const items = db.prepare(`
     SELECT request_logs.*, accounts.name AS account_name, accounts.email AS account_email
     FROM request_logs
     LEFT JOIN accounts ON accounts.id = request_logs.account_id
-    WHERE request_logs.created_at >= ? AND request_logs.created_at < ?
-      AND (input_tokens > 0 OR cached_input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)
+    WHERE ${filter.where}
     ORDER BY request_logs.id DESC
     LIMIT ? OFFSET ?
-  `).all(range.startAt, range.endAt, range.pageSize, range.offset);
+  `).all(...filter.params, range.pageSize, range.offset);
   const total = db.prepare(`
     SELECT COUNT(*) AS total
     FROM request_logs
-    WHERE created_at >= ? AND created_at < ?
-      AND (input_tokens > 0 OR cached_input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)
-  `).get(range.startAt, range.endAt).total;
+    LEFT JOIN accounts ON accounts.id = request_logs.account_id
+    WHERE ${filter.where}
+  `).get(...filter.params).total;
   return { items, total, page: range.page, pageSize: range.pageSize, startAt: range.startAt, endAt: range.endAt };
 }
 
 function tokenSummary(db, query) {
   const range = normalizeLogQuery(query);
+  const filter = tokenLogFilter(range);
   const total = db.prepare(`
     SELECT
       COUNT(*) AS calls,
@@ -333,9 +347,9 @@ function tokenSummary(db, query) {
       COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens,
       COALESCE(SUM(total_tokens), 0) AS total_tokens
     FROM request_logs
-    WHERE created_at >= ? AND created_at < ?
-      AND (input_tokens > 0 OR cached_input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)
-  `).get(range.startAt, range.endAt);
+    LEFT JOIN accounts ON accounts.id = request_logs.account_id
+    WHERE ${filter.where}
+  `).get(...filter.params);
   const byAccount = db.prepare(`
     SELECT
       request_logs.account_id,
@@ -348,12 +362,29 @@ function tokenSummary(db, query) {
       COALESCE(SUM(total_tokens), 0) AS total_tokens
     FROM request_logs
     LEFT JOIN accounts ON accounts.id = request_logs.account_id
-    WHERE request_logs.created_at >= ? AND request_logs.created_at < ?
-      AND (input_tokens > 0 OR cached_input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)
+    WHERE ${filter.where}
     GROUP BY request_logs.account_id
     ORDER BY total_tokens DESC
-  `).all(range.startAt, range.endAt);
+  `).all(...filter.params);
   return { total, byAccount };
+}
+
+function tokenLogFilter(range) {
+  const clauses = [
+    "request_logs.created_at >= ?",
+    "request_logs.created_at < ?",
+    "(input_tokens > 0 OR cached_input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)"
+  ];
+  const params = [range.startAt, range.endAt];
+  if (range.accountId) {
+    clauses.push("request_logs.account_id = ?");
+    params.push(range.accountId);
+  }
+  if (range.sessionId) {
+    clauses.push("request_logs.session_id LIKE ?");
+    params.push(`%${range.sessionId}%`);
+  }
+  return { where: clauses.join(" AND "), params };
 }
 
 function addAppLog(db, entry) {
@@ -368,6 +399,11 @@ function addAppLog(db, entry) {
     message: String(entry.message || ""),
     created_at: now()
   });
+}
+
+function clearAppLogs(db) {
+  const result = db.prepare("DELETE FROM app_logs").run();
+  return { deleted: Number(result.changes || 0) };
 }
 
 function listAppLogs(db, query) {
@@ -393,7 +429,20 @@ function normalizeLogQuery(query = {}) {
   const pageSize = clampInt(query.pageSize, 10, 5, 200);
   const startAt = clampInt(query.startAt, Math.floor(today.getTime() / 1000), 0, 4102444800);
   const endAt = clampInt(query.endAt, Math.floor(tomorrow.getTime() / 1000), startAt + 1, 4102444800);
-  return { page, pageSize, startAt, endAt, offset: (page - 1) * pageSize };
+  return {
+    page,
+    pageSize,
+    startAt,
+    endAt,
+    accountId: cleanFilterValue(query.accountId),
+    sessionId: cleanFilterValue(query.sessionId),
+    offset: (page - 1) * pageSize
+  };
+}
+
+function cleanFilterValue(value) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, 240) : "";
 }
 
 function clampInt(value, fallback, min, max) {

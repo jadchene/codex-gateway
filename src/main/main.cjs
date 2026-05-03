@@ -99,8 +99,18 @@ function createObservableStore(baseStore) {
       notifyDataChanged(["tokenLogs", "tokenSummary"]);
       return result;
     },
+    clearTokenLogs() {
+      const result = baseStore.clearTokenLogs();
+      notifyDataChanged(["tokenLogs", "tokenSummary"]);
+      return result;
+    },
     addAppLog(entry) {
       const result = baseStore.addAppLog(entry);
+      notifyDataChanged(["appLogs"]);
+      return result;
+    },
+    clearAppLogs() {
+      const result = baseStore.clearAppLogs();
       notifyDataChanged(["appLogs"]);
       return result;
     }
@@ -169,7 +179,18 @@ function registerIpc() {
   ipcMain.handle("accounts:list", () => store.listAccounts());
   ipcMain.handle("tokens:list", (_event, query) => store.listTokenLogs(query));
   ipcMain.handle("tokens:summary", (_event, query) => store.tokenSummary(query));
+  ipcMain.handle("tokens:clear", () => {
+    const result = store.clearTokenLogs();
+    store.addAppLog({
+      scope: "logs",
+      action: "clear-token-logs",
+      status: "success",
+      message: `已清空调用记录：${result.deleted} 条`
+    });
+    return result;
+  });
   ipcMain.handle("appLogs:list", (_event, query) => store.listAppLogs(query));
+  ipcMain.handle("appLogs:clear", () => store.clearAppLogs());
   ipcMain.handle("gateway:start", async () => {
     return startGateway("manual");
   });

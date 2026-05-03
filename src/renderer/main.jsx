@@ -218,6 +218,43 @@ function App() {
     setMessage(`${account.name} 已${enabled ? "启用" : "停用"}`);
   }
 
+  async function clearTokenLogs() {
+    if (!window.confirm("确定要清空全部调用记录吗？此操作不可恢复。")) return;
+    try {
+      const result = await api.clearTokenLogs();
+      const current = tokenLogsRef.current || {};
+      const query = {
+        page: 1,
+        pageSize: current.pageSize || 10,
+        startAt: current.startAt,
+        endAt: current.endAt
+      };
+      setTokenLogs(await api.listTokenLogs(query));
+      setTokenSummary(await api.tokenSummary(query));
+      setDashboardSummary(await api.tokenSummary());
+      setMessage(`已清空调用记录：${result.deleted || 0} 条`);
+    } catch (error) {
+      setMessage(`清空调用记录失败：${error.message}`);
+    }
+  }
+
+  async function clearAppLogs() {
+    if (!window.confirm("确定要清空全部运行日志吗？此操作不可恢复。")) return;
+    try {
+      const result = await api.clearAppLogs();
+      const current = appLogsRef.current || {};
+      setAppLogs(await api.listAppLogs({
+        page: 1,
+        pageSize: current.pageSize || 10,
+        startAt: current.startAt,
+        endAt: current.endAt
+      }));
+      setMessage(`已清空运行日志：${result.deleted || 0} 条`);
+    } catch (error) {
+      setMessage(`清空运行日志失败：${error.message}`);
+    }
+  }
+
   if (!ready) return <div className="boot">正在载入本地数据...</div>;
 
   return (
@@ -281,11 +318,22 @@ function App() {
           />
         )}
         {page === "gateway" && <GatewayPage gateway={gateway} gatewayBase={gatewayBase} settings={settings} onToggle={toggleGateway} onMessage={setMessage} />}
-        {page === "settings" && <SettingsPage settings={settings} paths={paths} onSave={saveSettings} />}
+        {page === "settings" && (
+          <SettingsPage
+            settings={settings}
+            paths={paths}
+            onSave={saveSettings}
+            onMessage={setMessage}
+            onClearTokenLogs={clearTokenLogs}
+            onClearAppLogs={clearAppLogs}
+          />
+        )}
         {page === "logs" && (
           <CallRecordsPage
             pageData={tokenLogs}
             summary={tokenSummary}
+            accounts={accounts}
+            onMessage={setMessage}
             onQuery={async (query) => {
               setTokenLogs(await api.listTokenLogs(query));
               setTokenSummary(await api.tokenSummary(query));
@@ -322,8 +370,7 @@ function Dashboard({ accounts, gateway, tokenSummary }) {
       <div className="dashboard-grid">
         <Metric title="调用次数" value={total.calls || 0} />
         <Metric title="总 Token" value={total.total_tokens || 0} />
-        <Metric title="输入 Token" value={total.input_tokens || 0} />
-        <Metric title="缓存 Token" value={total.cached_input_tokens || 0} />
+        <Metric title="输入(缓存) Token" value={formatCachedPair(total.input_tokens, total.cached_input_tokens)} hint={actualInputTitle(total.input_tokens, total.cached_input_tokens)} />
         <Metric title="输出 Token" value={total.output_tokens || 0} />
       </div>
     </section>
@@ -536,7 +583,7 @@ function GatewayPage({ gateway, gatewayBase, settings, onToggle, onMessage }) {
   );
 }
 
-function SettingsPage({ settings, paths, onSave }) {
+function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, onClearAppLogs }) {
   const [draft, setDraft] = useState(settings);
   const [showKey, setShowKey] = useState(false);
 
@@ -554,7 +601,12 @@ function SettingsPage({ settings, paths, onSave }) {
   }
 
   async function copyKey() {
-    await navigator.clipboard.writeText(draft.gateway_api_key || "");
+    try {
+      await navigator.clipboard.writeText(draft.gateway_api_key || "");
+      onMessage("复制成功");
+    } catch (error) {
+      onMessage(`复制失败：${error.message}`);
+    }
   }
 
   return (
@@ -602,6 +654,16 @@ function SettingsPage({ settings, paths, onSave }) {
         <InfoRow label="数据目录" value={paths.dataDir} />
         <InfoRow label="SQLite" value={paths.dbPath} />
       </div>
+      <div className="danger-zone">
+        <div>
+          <strong>数据清理</strong>
+          <span>清空本地记录数据，不会删除账号或应用配置。</span>
+        </div>
+        <div className="actions-inline">
+          <button type="button" className="danger ghost" onClick={onClearTokenLogs}>清空调用记录</button>
+          <button type="button" className="danger ghost" onClick={onClearAppLogs}>清空运行日志</button>
+        </div>
+      </div>
     </form>
   );
 }
@@ -625,8 +687,22 @@ function CodePreview({ title, value }) {
   );
 }
 
-function CallRecordsPage({ pageData, summary, onQuery }) {
-  const { query, setField, search, setPageSize, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
+function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
+  const { query, setField, search, runWithPatch, setPageSize, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
+  async function copyValue(value) {
+    const text = String(value || "").trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      onMessage("复制成功");
+    } catch (error) {
+      onMessage(`复制失败：${error.message}`);
+    }
+  }
+  async function toggleAccountFilter(accountId) {
+    if (!accountId) return;
+    await runWithPatch({ accountId: query.accountId === accountId ? "" : accountId }, 1);
+  }
   return (
     <section className="panel">
       <div className="section-title">
@@ -635,37 +711,65 @@ function CallRecordsPage({ pageData, summary, onQuery }) {
           <p className="subtle">只记录网关调用产生的 token 使用情况，默认查询今天。</p>
         </div>
       </div>
-      <LogFilters query={query} setField={setField} onSearch={search} />
+      <LogFilters query={query} setField={setField} onSearch={search} showTokenFilters />
       {summary?.byAccount?.length > 0 && (
         <div className="summary-list">
           {summary.byAccount.map((item) => (
-            <div className="summary-row" key={item.account_id || "none"}>
-              <span>{item.account_name}</span>
-              <b>{item.total_tokens} token</b>
-              <small>输入 {item.input_tokens} / 缓存 {item.cached_input_tokens} / 输出 {item.output_tokens}</small>
-            </div>
+            <button
+              type="button"
+              className={`summary-row summary-button${query.accountId === item.account_id ? " active" : ""}`}
+              key={item.account_id || "none"}
+              onClick={() => toggleAccountFilter(item.account_id)}
+              disabled={!item.account_id}
+            >
+              <div className="summary-main">
+                <strong>{item.account_name}</strong>
+                <b>总计: {formatTokenNumber(item.total_tokens)}</b>
+              </div>
+              <small title={actualInputTitle(item.input_tokens, item.cached_input_tokens)}>输入{formatTokenNumber(item.input_tokens)}(缓存{formatTokenNumber(item.cached_input_tokens)})/输出{formatTokenNumber(item.output_tokens)}</small>
+            </button>
           ))}
         </div>
       )}
-      <table>
-        <thead><tr><th>时间</th><th>账号</th><th>客户端路径</th><th>上游路径</th><th>状态</th><th>耗时</th><th>输入</th><th>缓存</th><th>输出</th><th>总计</th></tr></thead>
-        <tbody>
-          {pageData.items.map((log) => (
-            <tr key={log.id}>
-              <td>{formatTime(log.created_at)}</td>
-              <td>{log.account_name || log.account_id || "-"}</td>
-              <td className="url-cell" title={log.request_path || ""}>{log.request_path || "-"}</td>
-              <td className="url-cell" title={log.upstream_path || ""}>{log.upstream_path || "-"}</td>
-              <td>{log.status || "-"}</td>
-              <td>{log.duration_ms ? `${log.duration_ms} ms` : "-"}</td>
-              <td>{log.input_tokens || 0}</td>
-              <td>{log.cached_input_tokens || 0}</td>
-              <td>{log.output_tokens || 0}</td>
-              <td>{log.total_tokens || 0}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>账号</th><th>会话 ID</th><th>客户端路径</th><th>状态</th><th>耗时</th><th>输入(缓存)</th><th>输出</th><th>总计</th></tr></thead>
+          <tbody>
+            {pageData.items.map((log) => (
+              <tr key={log.id}>
+                <td>{formatTime(log.created_at)}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="text-copy"
+                    title={log.account_name || log.account_id || ""}
+                    onClick={() => copyValue(log.account_name || log.account_id)}
+                    disabled={!log.account_name && !log.account_id}
+                  >
+                    {log.account_name || log.account_id || "-"}
+                  </button>
+                </td>
+                <td className="session-cell" title={log.session_id || ""}>
+                  <button
+                    type="button"
+                    className="text-copy"
+                    onClick={() => copyValue(log.session_id)}
+                    disabled={!log.session_id}
+                  >
+                    {log.session_id || "-"}
+                  </button>
+                </td>
+                <td className="url-cell" title={log.request_path || ""}>{log.request_path || "-"}</td>
+                <td>{log.status || "-"}</td>
+                <td>{log.duration_ms ? `${log.duration_ms} ms` : "-"}</td>
+                <td title={actualInputTitle(log.input_tokens, log.cached_input_tokens)}>{formatCachedPair(log.input_tokens, log.cached_input_tokens)}</td>
+                <td>{formatTokenNumber(log.output_tokens)}</td>
+                <td>{formatTokenNumber(log.total_tokens)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <Pager pageData={pageData} query={query} onPageSize={setPageSize} onPrev={prevPage} onNext={nextPage} />
     </section>
   );
@@ -682,29 +786,31 @@ function AppLogsPage({ pageData, onQuery }) {
         </div>
       </div>
       <LogFilters query={query} setField={setField} onSearch={search} />
-      <table>
-        <thead><tr><th>时间</th><th>级别</th><th>模块</th><th>动作</th><th>状态</th><th>消息</th></tr></thead>
-        <tbody>
-          {pageData.items.map((log) => (
-            <tr key={log.id}>
-              <td>{formatTime(log.created_at)}</td>
-              <td>{log.level}</td>
-              <td>{log.scope || "-"}</td>
-              <td>{log.action || "-"}</td>
-              <td>{log.status || "-"}</td>
-              <td className="message-cell" title={log.message || ""}>{log.message || ""}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table className="app-log-table">
+          <thead><tr><th>时间</th><th>级别</th><th>模块</th><th>动作</th><th>状态</th><th>消息</th></tr></thead>
+          <tbody>
+            {pageData.items.map((log) => (
+              <tr key={log.id}>
+                <td>{formatTime(log.created_at)}</td>
+                <td>{log.level}</td>
+                <td>{log.scope || "-"}</td>
+                <td>{log.action || "-"}</td>
+                <td>{log.status || "-"}</td>
+                <td className="message-cell" title={log.message || ""}>{log.message || ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <Pager pageData={pageData} query={query} onPageSize={setPageSize} onPrev={prevPage} onNext={nextPage} />
     </section>
   );
 }
 
-function LogFilters({ query, setField, onSearch }) {
+function LogFilters({ query, setField, onSearch, showTokenFilters = false }) {
   return (
-    <div className="filter-row">
+    <div className={showTokenFilters ? "filter-row token-filter-row" : "filter-row"}>
       <label className="field">
         <span>开始日期</span>
         <input type="date" value={query.startDate} onChange={(event) => setField("startDate", event.target.value)} />
@@ -713,6 +819,12 @@ function LogFilters({ query, setField, onSearch }) {
         <span>结束日期</span>
         <input type="date" value={query.endDate} onChange={(event) => setField("endDate", event.target.value)} />
       </label>
+      {showTokenFilters && (
+        <label className="field">
+          <span>会话 ID</span>
+          <input value={query.sessionId || ""} onChange={(event) => setField("sessionId", event.target.value)} />
+        </label>
+      )}
       <div className="filter-action">
         <span>操作</span>
         <button type="button" className="primary" onClick={onSearch}>查询</button>
@@ -748,10 +860,16 @@ function usePagedQuery(onQuery, pageData) {
     setQuery(next);
     await onQuery(toLogQuery(next));
   }
+  async function runWithPatch(patch, page = 1) {
+    const next = { ...query, ...patch, page };
+    setQuery(next);
+    await onQuery(toLogQuery(next));
+  }
   return {
     query,
     setField,
     search: () => run(1),
+    runWithPatch,
     setPageSize: async (pageSize) => {
       const next = { ...query, page: 1, pageSize };
       setQuery(next);
@@ -762,11 +880,11 @@ function usePagedQuery(onQuery, pageData) {
   };
 }
 
-function Metric({ title, value }) {
+function Metric({ title, value, hint }) {
   const displayValue = typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value))
-    ? String(value).replace(/\B(?=(\d{4})+(?!\d))/g, ",")
+    ? formatTokenNumber(value)
     : value;
-  return <article className="panel metric"><span>{title}</span><strong>{displayValue}</strong></article>;
+  return <article className="panel metric" title={hint || ""}><span>{title}</span><strong>{displayValue}</strong></article>;
 }
 
 function Field({ label, name, value, type = "text", secret }) {
@@ -807,6 +925,18 @@ function formatTime(value) {
   return date.toLocaleString();
 }
 
+function formatCachedPair(input, cached) {
+  return `${formatTokenNumber(input)}(${formatTokenNumber(cached)})`;
+}
+
+function actualInputTitle(input, cached) {
+  return `实际输入：${formatTokenNumber(Math.max(0, Number(input || 0) - Number(cached || 0)))}`;
+}
+
+function formatTokenNumber(value) {
+  return String(Number(value || 0)).replace(/\B(?=(\d{4})+(?!\d))/g, ",");
+}
+
 function generateApiKey() {
   const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const bytes = crypto.getRandomValues(new Uint8Array(48));
@@ -844,7 +974,9 @@ function toLogQuery(query) {
     page: Number(query.page || 1),
     pageSize: Number(query.pageSize || 10),
     startAt: Math.floor(start.getTime() / 1000),
-    endAt: Math.floor(end.getTime() / 1000)
+    endAt: Math.floor(end.getTime() / 1000),
+    accountId: String(query.accountId || "").trim(),
+    sessionId: String(query.sessionId || "").trim()
   };
 }
 
