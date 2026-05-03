@@ -3,7 +3,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { pickGatewayAccount, quotaWindowExhausted, usageScore } = require("../src/main/selection.cjs");
+const { pickGatewayAccount, quotaWindowExhausted, resetSelectionState, usageScore } = require("../src/main/selection.cjs");
 const { buildAuthorizeUrl } = require("../src/main/auth.cjs");
 const { gatewayProviderBlock, insertProviderBlockIntoConfig, replaceGatewayProviderBlock } = require("../src/main/codex-cli-auth.cjs");
 const {
@@ -16,6 +16,7 @@ const {
 } = require("../src/main/gateway.cjs");
 
 test("pickGatewayAccount chooses enabled token account with lowest quota usage", () => {
+  resetSelectionState();
   const account = pickGatewayAccount([
     { id: "disabled", enabled: false, access_token: "a", status: "active", quota_5h_used_percent: 0 },
     { id: "busy", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 80 },
@@ -32,7 +33,7 @@ test("buildAuthorizeUrl uses the official Codex OAuth scope shape", () => {
     codeChallenge: "challenge",
     state: "state"
   }));
-  assert.equal(url.searchParams.get("scope"), "openid profile email offline_access api.connectors.read api.connectors.invoke");
+  assert.equal(url.searchParams.get("scope"), "openid profile email offline_access");
   assert.equal(url.searchParams.get("codex_cli_simplified_flow"), "true");
   assert.equal(url.searchParams.get("id_token_add_organizations"), "true");
   assert.equal(url.searchParams.get("originator"), "codex_cli_rs");
@@ -40,6 +41,7 @@ test("buildAuthorizeUrl uses the official Codex OAuth scope shape", () => {
 });
 
 test("pickGatewayAccount can exclude failed accounts", () => {
+  resetSelectionState();
   const account = pickGatewayAccount([
     { id: "first", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 1 },
     { id: "second", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 20 }
@@ -52,11 +54,63 @@ test("usageScore uses the highest active quota window", () => {
 });
 
 test("quotaWindowExhausted marks accounts with a depleted window unavailable", () => {
+  resetSelectionState();
   assert.equal(quotaWindowExhausted({ quota_5h_used_percent: 100, quota_7d_used_percent: 20 }), true);
   assert.equal(pickGatewayAccount([
     { id: "empty", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 100 },
     { id: "usable", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 50 }
   ]).id, "usable");
+});
+
+test("pickGatewayAccount rotates full 5h remaining accounts first", () => {
+  resetSelectionState();
+  const accounts = [
+    { id: "full-a", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 0 },
+    { id: "full-b", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 0 },
+    { id: "partial", enabled: true, access_token: "c", status: "active", quota_5h_used_percent: 10 }
+  ];
+  assert.equal(pickGatewayAccount(accounts).id, "full-a");
+  assert.equal(pickGatewayAccount(accounts).id, "full-b");
+  assert.equal(pickGatewayAccount(accounts).id, "full-a");
+});
+
+test("pickGatewayAccount falls back to lower 5h usage when no full account exists", () => {
+  resetSelectionState();
+  const account = pickGatewayAccount([
+    { id: "more-used", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 40 },
+    { id: "less-used", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 15 }
+  ]);
+  assert.equal(account.id, "less-used");
+});
+
+test("pickGatewayAccount sticks to a healthy partial account", () => {
+  resetSelectionState();
+  const accounts = [
+    { id: "first", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 20 },
+    { id: "second", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 30 }
+  ];
+  assert.equal(pickGatewayAccount(accounts).id, "first");
+  assert.equal(pickGatewayAccount(accounts).id, "first");
+});
+
+test("pickGatewayAccount switches away when remaining 5h quota is below threshold", () => {
+  resetSelectionState();
+  assert.equal(pickGatewayAccount([
+    { id: "current", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 20 }
+  ]).id, "current");
+  assert.equal(pickGatewayAccount([
+    { id: "current", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 96 },
+    { id: "next", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 40 }
+  ]).id, "next");
+});
+
+test("pickGatewayAccount uses low remaining accounts only when unavoidable", () => {
+  resetSelectionState();
+  const account = pickGatewayAccount([
+    { id: "almost-empty", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 97 },
+    { id: "least-empty", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 96 }
+  ]);
+  assert.equal(account.id, "least-empty");
 });
 
 test("buildUpstreamUrl maps local /v1 requests to codex backend prefix", () => {

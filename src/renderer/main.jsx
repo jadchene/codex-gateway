@@ -262,7 +262,7 @@ function App() {
       <aside className="sidebar">
         <div>
           <div className="brand">Codex Gateway</div>
-          <div className="muted">个人 GPT 账号池与本地网关</div>
+          <div className="muted">个人 GPT 账号管理与本地网关</div>
         </div>
         <nav>
           {pages.map((item) => (
@@ -359,7 +359,7 @@ function Dashboard({ accounts, gateway, tokenSummary }) {
       <div className="section-title">
         <div>
           <h2>运行概览</h2>
-          <p className="subtle">查看账号池、本地网关和今天的调用用量。</p>
+          <p className="subtle">查看账号管理、本地网关和今天的调用用量。</p>
         </div>
       </div>
       <div className="dashboard-grid">

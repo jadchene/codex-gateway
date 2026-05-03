@@ -1,20 +1,26 @@
 # Codex Gateway
 
-**Disclaimer**: This project is strictly for learning and development purposes. Users must comply with the Terms of Service of the respective platforms. This project is designed for personal, local use only. Exposing the service to multiple users or engaging in any form of commercial resale is strictly prohibited. I do not provide or distribute any accounts, API Keys, or proxy services, nor do I assume any responsibility for how this software is utilized. Please do not use this project to bypass rate limits or other service restrictions.
+[中文文档](README_zh.md)
 
-Personal Codex account manager and transparent local gateway.
+**Disclaimer**: This project is for learning and local development only. Users must comply with the Terms of Service of the relevant platforms. It is intended for personal local use and does not provide or distribute accounts, API keys, or proxy services. It must not be used for multi-user sharing, commercial resale, bypassing limits, or any other activity that violates service terms. Use it at your own risk.
 
-Codex Gateway is a local desktop app built with Electron, React, and Vite. It manages multiple ChatGPT/Codex accounts and exposes a transparent local OpenAI-compatible gateway for Codex. It is designed for personal local usage: account login, quota refresh, Codex auth writes, request forwarding, and token usage records live in one desktop app.
+Codex Gateway is a local desktop app for managing personal Codex/ChatGPT login state, viewing quota information, and exposing a local `/v1/responses` gateway for Codex. It is built with Electron, React, and Vite, with local data stored in SQLite.
 
 ### Features
 
-- **Dashboard**: View runtime overview, available account ratio, gateway status, and today's token usage statistics.
-- **Accounts**: Login via browser OAuth, track 5-hour and 7-day quota windows, and support manual, scheduled, and automatic quota-reset refreshes.
-- **Auth Management**: Seamlessly switch between Gateway and Account modes, writing the necessary config to `~/.codex/auth.json` and `~/.codex/config.toml` automatically.
-- **Gateway**: Exposes a transparent `/v1/responses` gateway for Codex, featuring automatic routing and failover across multiple accounts based on quota availability.
-- **Call Logs**: Detailed history of requests with input/output token usage, duration, and filtering by account or session ID.
-- **App Logs**: Track application lifecycle events, background quota refreshes, and auth-write statuses.
-- **Settings**: Configure the local gateway port, local API key, scheduled refresh intervals, and manage local data.
+- **Dashboard**: View gateway status, available account count, and today's token usage statistics.
+- **Accounts**: Add accounts through browser OAuth, view 5-hour and 7-day quota windows, and refresh usage manually or on a schedule.
+- **Auth Management**: Switch between gateway mode and account mode, writing `~/.codex/auth.json` and `~/.codex/config.toml` as needed.
+- **Local Gateway**: Exposes only the Codex-oriented `/v1/models`, `/v1/responses`, and `/v1/responses/compact` routes.
+- **Call Records**: Records request path, account, session ID, duration, and token usage, with filtering by date, session ID, and account summary cards.
+- **App Logs**: Tracks startup, auth writes, account refreshes, gateway start/stop events, and failures.
+- **Settings**: Configure the local port, API key, refresh interval, close behavior, and clear local call/runtime logs.
+
+### Account Usage Model
+
+For each request, the gateway uses one currently available account for the upstream call. If that account returns an authentication, quota, or rate-limit error, the app refreshes local usage information and then tries the next available account in sequence for that request.
+
+This behavior is intended to reduce manual account-configuration switching during personal local development. It should not be interpreted as concurrent scheduling, resource pooling, quota aggregation, or a way to bypass service restrictions.
 
 ### Gateway Endpoints
 
@@ -22,7 +28,7 @@ Codex Gateway is a local desktop app built with Electron, React, and Vite. It ma
 - `POST /v1/responses`
 - `POST /v1/responses/compact`
 
-The gateway passes through client headers and only replaces the upstream `Authorization` and `ChatGPT-Account-ID` headers.
+The gateway passes through client headers and only replaces the upstream `Authorization` and `ChatGPT-Account-ID` headers. Image endpoints are not supported.
 
 ### Development
 
@@ -46,8 +52,6 @@ npm run build
 
 ### Packaging
 
-Create an unpacked package:
-
 ```bash
 npm run pack:unpacked
 ```
@@ -66,12 +70,12 @@ release/win-unpacked/Codex Gateway.exe
 
 ### Codex Integration
 
-The `Auth Management` page supports two modes:
+The Auth Management page supports two modes:
 
-- Gateway mode: writes `OPENAI_API_KEY` to `~/.codex/auth.json` and adds the provider config to `~/.codex/config.toml` when missing.
-- Account mode: writes the selected local account token to `~/.codex/auth.json` and removes the `codex_gateway` provider written by this app.
+- **Gateway mode**: writes a local `OPENAI_API_KEY` to `~/.codex/auth.json` and adds the `codex_gateway` provider when needed.
+- **Account mode**: writes the selected local account token to `~/.codex/auth.json` and removes the `codex_gateway` provider written by this app.
 
-Manual client configuration:
+Manual configuration example:
 
 ```text
 OPENAI_BASE_URL=http://localhost:8436/v1
@@ -80,33 +84,16 @@ OPENAI_API_KEY=local-personal-token
 
 The local API key can be changed in app settings.
 
-### Data Directory
+### Local Data
 
-Default local data:
+Default data paths:
 
 ```text
 data/codex-gateway.sqlite
 data/browser
 ```
 
-SQLite stores accounts, quota snapshots, call records, runtime logs, and app settings. The actual data directory and database path are shown in the app settings page.
-
-### Security Notes
-
-Account tokens and the local API key are stored only on your machine. Do not commit `data/`, `~/.codex/auth.json`, `~/.codex/config.toml`, or any file containing tokens. This project targets personal local usage and does not provide multi-tenant isolation beyond the local gateway API key.
-
-### Project Status
-
-This project is still moving quickly. Gateway compatibility may change with Codex and upstream API behavior. After upgrading, verify auth writes, quota refresh, and your common request paths before relying on it for critical work.
-
-### License
-
-MIT
-does not provide multi-tenant isolation beyond the local gateway API key.
-
-### Project Status
-
-This project is still moving quickly. Gateway compatibility may change with Codex and upstream API behavior. After upgrading, verify auth writes, quota refresh, and your common request paths before relying on it for critical work.
+SQLite stores account data, quota snapshots, call records, runtime logs, and app settings. Do not commit `data/`, `~/.codex/auth.json`, `~/.codex/config.toml`, or any file containing tokens.
 
 ### License
 

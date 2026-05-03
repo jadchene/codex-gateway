@@ -46,13 +46,14 @@ async function handleRequest(req, res, store, authService, hooks) {
   if (req.method === "GET" && pathname === "/auth/callback") {
     return handleAuthCallback(parsedUrl, res, authService);
   }
-  if (!pathname.startsWith("/v1/")) {
-    return sendJson(res, 404, { error: { message: "Only /v1/* gateway routes are supported." } });
+  const allowedPaths = ["/v1/models", "/v1/responses", "/v1/responses/compact"];
+  if (!allowedPaths.includes(pathname)) {
+    return sendJson(res, 404, { error: { message: "Unrecognized request URL." } });
   }
   const auth = req.headers.authorization || "";
   const localKey = settings.gateway_api_key || "";
   if (localKey && auth !== `Bearer ${localKey}`) {
-    return sendJson(res, 401, { error: { message: "Invalid local gateway API key." } });
+    return sendJson(res, 401, { error: { message: "Incorrect API key provided." } });
   }
 
   try {
@@ -60,22 +61,63 @@ async function handleRequest(req, res, store, authService, hooks) {
     const request = buildGatewayRequest(settings.upstream_base_url, req.url, incomingBody, req.headers);
     const firstAccount = pickGatewayAccount(store.listAccounts());
     if (!firstAccount) {
-      return sendJson(res, 503, { error: { message: "No enabled GPT account with an access token is available." } });
+      return sendJson(res, 503, { error: { message: "The server is currently unavailable. Please try again later." } });
     }
-    const { account, result } = await callWithFailover(req, request, firstAccount, settings, store, hooks, started);
-    writeUpstreamResponse(res, result);
-    store.addTokenLog({
-      account_id: account.id,
-      method: req.method,
-      request_path: request.originalPath,
-      upstream_path: pathFromUrl(request.upstreamUrl),
-      session_id: headerValue(req.headers.session_id),
-      version: headerValue(req.headers.version),
-      status: result.status,
-      duration_ms: Date.now() - started,
-      ...result.tokenUsage,
-      message: null
-    });
+
+    const { account, response, body, tokenUsage: errorUsage } = await callWithFailover(req, request, firstAccount, settings, store, hooks);
+
+    if (response.status >= 200 && response.status < 300) {
+      res.statusCode = response.status;
+      copyHeadersToResponse(response.headers, res);
+      
+      const usageParser = createSseUsageParser();
+      if (response.body) {
+        const reader = response.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            usageParser.feed(value);
+            await writeResponseChunk(res, value);
+          }
+        } finally {
+          res.end();
+        }
+      } else {
+        res.end();
+      }
+
+      const finalUsage = usageParser.latestUsage();
+      store.addTokenLog({
+        account_id: account.id,
+        method: req.method,
+        request_path: request.originalPath,
+        upstream_path: pathFromUrl(request.upstreamUrl),
+        session_id: headerValue(req.headers.session_id),
+        version: headerValue(req.headers.version),
+        status: response.status,
+        duration_ms: Date.now() - started,
+        ...finalUsage,
+        message: null
+      });
+    } else {
+      res.statusCode = response.status;
+      copyHeadersToResponse(response.headers, res);
+      res.end(body);
+
+      store.addTokenLog({
+        account_id: account.id,
+        method: req.method,
+        request_path: request.originalPath,
+        upstream_path: pathFromUrl(request.upstreamUrl),
+        session_id: headerValue(req.headers.session_id),
+        version: headerValue(req.headers.version),
+        status: response.status,
+        duration_ms: Date.now() - started,
+        ...errorUsage,
+        message: null
+      });
+    }
   } catch (error) {
     const message = error?.name === "AbortError" ? "Upstream request timed out." : String(error?.message || error);
     store.addAppLog({
@@ -85,7 +127,8 @@ async function handleRequest(req, res, store, authService, hooks) {
       status: "failed",
       message
     });
-    sendJson(res, 502, { error: { message } });
+    const clientMessage = error?.name === "AbortError" ? "Request timed out." : "The server encountered a temporary error and could not complete your request.";
+    sendJson(res, 502, { error: { message: clientMessage } });
   }
 }
 
@@ -101,7 +144,7 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
   let refreshedUsage = false;
   for (let attempt = 0; attempt < 8 && account; attempt += 1) {
     let result = await callUpstream(req, request, account, settings);
-    if (isAuthExpiredResponse(result.status, result.body) && hooks.refreshAccountToken) {
+    if (isAuthExpiredResponse(result.response.status, result.body) && hooks.refreshAccountToken) {
       try {
         const refreshed = await hooks.refreshAccountToken(account.id);
         account = refreshed || account;
@@ -117,8 +160,9 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
         });
       }
     }
-    if (!isQuotaExhaustedResponse(result.status, result.body)) {
-      return { account, result };
+    if (!isQuotaExhaustedResponse(result.response.status, result.body)) {
+      markFullFiveHourAccountUsed(account, store);
+      return { account, ...result };
     }
     lastResult = result;
     excluded.add(account.id);
@@ -128,14 +172,28 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
         level: "warn",
         scope: "gateway",
         action: "quota-failover",
-        status: String(result.status),
+        status: String(result.response.status),
         message: `${request.path} 触发额度/限流信号，刷新全部账号后切换账号重试`
       });
       await hooks.refreshAllUsage("gateway-quota-failover");
     }
     account = pickGatewayAccount(store.listAccounts(), Array.from(excluded));
   }
-  return { account: firstAccount, result: lastResult };
+  if (lastResult) return { account: firstAccount, ...lastResult };
+  throw new Error("No enabled GPT account with an access token is available.");
+}
+
+function markFullFiveHourAccountUsed(account, store) {
+  if (!account?.id || Number(account.quota_5h_used_percent || 0) > 0) return;
+  account.quota_5h_used_percent = 1;
+  account.quota_5h_reset_at = Math.floor(Date.now() / 1000) + 18_000;
+  store.updateUsage(account.id, {
+    quota_5h_used_percent: 1,
+    quota_5h_reset_at: account.quota_5h_reset_at,
+    quota_7d_used_percent: null,
+    quota_7d_reset_at: null,
+    raw_usage_json: null
+  });
 }
 
 async function callUpstream(req, request, account, settings) {
@@ -150,23 +208,27 @@ async function callUpstream(req, request, account, settings) {
       body: hasBody ? request.body : undefined,
       signal: controller?.signal
     });
+    if (upstream.status >= 200 && upstream.status < 300) {
+      return { response: upstream, body: null, tokenUsage: emptyUsage() };
+    }
     const responseBody = Buffer.from(await upstream.arrayBuffer());
-    const headers = [];
-    upstream.headers.forEach((value, key) => headers.push([key, value]));
-    return { status: upstream.status, headers, body: responseBody, tokenUsage: extractTokenUsage(responseBody) };
+    return { response: upstream, body: responseBody, tokenUsage: extractTokenUsage(responseBody) };
   } finally {
     if (timeout) clearTimeout(timeout);
   }
 }
 
-function writeUpstreamResponse(res, result) {
-  res.statusCode = result.status;
-  for (const [key, value] of result.headers) {
+function copyHeadersToResponse(headers, res) {
+  headers.forEach((value, key) => {
     if (!["content-encoding", "content-length", "transfer-encoding", "connection"].includes(key.toLowerCase())) {
       res.setHeader(key, value);
     }
-  }
-  res.end(result.body);
+  });
+}
+
+function writeResponseChunk(res, value) {
+  if (res.write(value)) return Promise.resolve();
+  return new Promise((resolve) => res.once("drain", resolve));
 }
 
 function isQuotaExhaustedResponse(status, body) {
@@ -200,30 +262,26 @@ function buildGatewayRequest(baseUrl, requestUrl, body, headers = {}) {
   return { upstreamUrl, body, path, originalPath: `${parsed.pathname}${parsed.search}` };
 }
 
-function parseJsonBuffer(body) {
-  try {
-    return JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : String(body || ""));
-  } catch {
-    return null;
-  }
-}
-
-function copyKnown(source, target, keys) {
-  for (const key of keys) {
-    if (source[key] !== undefined) target[key] = source[key];
-  }
-}
-
-function removeUndefined(value) {
-  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
-}
-
 function extractTokenUsage(body) {
   const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body || "");
   if (!text.trim()) return emptyUsage();
   const direct = parseUsageJson(text);
   if (hasUsage(direct)) return direct;
   return parseUsageSse(text);
+}
+
+function createSseUsageParser() {
+  const decoder = new TextDecoder();
+  let text = "";
+  return {
+    feed(chunk) {
+      text += decoder.decode(chunk, { stream: true });
+    },
+    latestUsage() {
+      text += decoder.decode();
+      return parseUsageSse(text);
+    }
+  };
 }
 
 function parseUsageJson(text) {
@@ -285,14 +343,6 @@ function findUsage(value) {
     }
   }
   return null;
-}
-
-function mergeUsage(target, usage) {
-  target.input_tokens += usage.input_tokens;
-  target.cached_input_tokens += usage.cached_input_tokens;
-  target.output_tokens += usage.output_tokens;
-  target.reasoning_output_tokens += usage.reasoning_output_tokens;
-  target.total_tokens += usage.total_tokens;
 }
 
 function hasUsage(usage) {

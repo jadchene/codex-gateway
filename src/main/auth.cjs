@@ -141,7 +141,7 @@ function buildAuthorizeUrl({ issuer, clientId, redirectUri, codeChallenge, state
     response_type: "code",
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: "openid profile email offline_access api.connectors.read api.connectors.invoke",
+    scope: "openid profile email offline_access",
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
     id_token_add_organizations: "true",
