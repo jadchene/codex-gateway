@@ -6,6 +6,7 @@
 
 * {
   box-sizing: border-box;
+  cursor: default;
 }
 
 body {
@@ -25,11 +26,11 @@ button {
   color: #17202a;
   border-radius: 7px;
   padding: 8px 12px;
-  cursor: pointer;
+  cursor: default;
 }
 
 button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.62;
 }
 
@@ -167,7 +168,6 @@ h1 {
 .section-title,
 .account-head,
 .meta-row,
-.card-actions,
 .quota > div:first-child {
   display: flex;
   justify-content: space-between;
@@ -175,8 +175,69 @@ h1 {
   align-items: center;
 }
 
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+
 .section-title {
   margin-bottom: 14px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(15 23 42 / 32%);
+}
+
+.modal {
+  width: min(360px, 100%);
+  border: 1px solid #dde3eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+  box-shadow: 0 24px 60px rgb(15 23 42 / 24%);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.modal-head h3 {
+  margin: 0;
+}
+
+.modal-close {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #667085;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  background: #f2f4f7;
+  color: #17202a;
+}
+
+.modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .subtle {
@@ -302,6 +363,49 @@ select {
   border-radius: 7px;
   padding: 9px 10px;
   background: #ffffff;
+  color: #17202a;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: #94a3b8;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+select {
+  appearance: none;
+  padding-right: 38px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #475467 50%),
+    linear-gradient(135deg, #475467 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 12px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  cursor: default;
+}
+
+select:disabled,
+input:disabled,
+textarea:disabled {
+  background-color: #f8fafc;
+  color: #98a2b3;
+  cursor: default;
+}
+
+input,
+textarea {
+  cursor: text;
 }
 
 .input-actions {
@@ -312,6 +416,45 @@ select {
 
 .input-actions button {
   white-space: nowrap;
+}
+
+.segmented {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  width: fit-content;
+  padding: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.segmented button {
+  min-width: 112px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #475467;
+  padding: 8px 12px;
+  font-weight: 400;
+  cursor: default;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.segmented button:hover {
+  background: #eef4ff;
+  color: #1d4ed8;
+}
+
+.segmented button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+
+.segmented button.active {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
 }
 
 .mode-grid {
@@ -418,9 +561,18 @@ select {
   box-shadow: 0 0 0 2px rgb(249 115 22 / 13%);
 }
 
-.picker-option.disabled {
+.picker-option.unavailable {
   color: #98a2b3;
   background: #f8fafc;
+  border-color: #d0d5dd;
+  box-shadow: none;
+  cursor: default;
+}
+
+.picker-option.unavailable strong,
+.picker-option.unavailable em,
+.picker-option.unavailable .account-option-meta {
+  color: #98a2b3;
 }
 
 .auth-preview-grid {
@@ -441,7 +593,7 @@ select {
 }
 
 .code-preview pre {
-  min-height: 138px;
+  max-height: 200px;
   margin: 0;
   overflow: auto;
   padding: 11px;
@@ -632,6 +784,19 @@ td {
   padding: 9px 8px;
   font-size: 13px;
   vertical-align: top;
+}
+
+.url-cell {
+  max-width: 260px;
+  overflow-wrap: anywhere;
+  color: #344054;
+}
+
+.message-cell {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 th {

@@ -68,7 +68,8 @@ function migrate(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id TEXT,
       method TEXT NOT NULL,
-      path TEXT NOT NULL,
+      request_path TEXT,
+      upstream_path TEXT,
       status INTEGER,
       duration_ms INTEGER,
       input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -101,6 +102,9 @@ function migrate(db) {
   addColumnIfMissing(db, "accounts", "id_token", "TEXT");
   addColumnIfMissing(db, "accounts", "last_refresh", "TEXT");
   addColumnIfMissing(db, "request_logs", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "request_logs", "request_path", "TEXT");
+  addColumnIfMissing(db, "request_logs", "upstream_path", "TEXT");
+  dropColumnIfExists(db, "request_logs", "path");
   addColumnIfMissing(db, "request_logs", "cached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "request_logs", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "request_logs", "reasoning_output_tokens", "INTEGER NOT NULL DEFAULT 0");
@@ -113,6 +117,7 @@ function migrate(db) {
     request_timeout_ms: "0",
     usage_refresh_interval_secs: "900",
     auto_start_gateway: "false",
+    close_behavior: "exit",
     codex_auth_mode: "gateway",
     codex_selected_account_id: ""
   };
@@ -237,6 +242,16 @@ function addColumnIfMissing(db, table, column, definition) {
   }
 }
 
+function dropColumnIfExists(db, table, column) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
+  if (!columns.includes(column)) return;
+  try {
+    db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+  } catch {
+    // Older SQLite builds may not support DROP COLUMN. The application no longer reads or writes this field.
+  }
+}
+
 function saveLoginSession(db, session) {
   const ts = now();
   db.prepare(`
@@ -261,19 +276,20 @@ function addTokenLog(db, entry) {
   if (!hasTokenUsage(entry)) return;
   db.prepare(`
     INSERT INTO request_logs (
-      account_id, method, path, status, duration_ms,
+      account_id, method, request_path, upstream_path, status, duration_ms,
       input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
       message, created_at
     )
     VALUES (
-      @account_id, @method, @path, @status, @duration_ms,
+      @account_id, @method, @request_path, @upstream_path, @status, @duration_ms,
       @input_tokens, @cached_input_tokens, @output_tokens, @reasoning_output_tokens, @total_tokens,
       @message, @created_at
     )
   `).run({
     account_id: entry.account_id || null,
     method: entry.method || "GET",
-    path: entry.path || "/",
+    request_path: entry.request_path || null,
+    upstream_path: entry.upstream_path || null,
     status: entry.status || null,
     duration_ms: entry.duration_ms || null,
     input_tokens: toInt(entry.input_tokens),
@@ -374,7 +390,7 @@ function normalizeLogQuery(query = {}) {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
   const page = clampInt(query.page, 1, 1, 100000);
-  const pageSize = clampInt(query.pageSize, 20, 5, 200);
+  const pageSize = clampInt(query.pageSize, 10, 5, 200);
   const startAt = clampInt(query.startAt, Math.floor(today.getTime() / 1000), 0, 4102444800);
   const endAt = clampInt(query.endAt, Math.floor(tomorrow.getTime() / 1000), startAt + 1, 4102444800);
   return { page, pageSize, startAt, endAt, offset: (page - 1) * pageSize };

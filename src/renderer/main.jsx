@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -18,15 +18,18 @@ function App() {
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState({});
   const [accounts, setAccounts] = useState([]);
-  const [tokenLogs, setTokenLogs] = useState({ items: [], total: 0, page: 1, pageSize: 20 });
+  const [tokenLogs, setTokenLogs] = useState({ items: [], total: 0, page: 1, pageSize: 10 });
   const [tokenSummary, setTokenSummary] = useState({ total: {}, byAccount: [] });
-  const [appLogs, setAppLogs] = useState({ items: [], total: 0, page: 1, pageSize: 20 });
+  const [dashboardSummary, setDashboardSummary] = useState({ total: {}, byAccount: [] });
+  const [appLogs, setAppLogs] = useState({ items: [], total: 0, page: 1, pageSize: 10 });
   const [gateway, setGateway] = useState({ running: false, url: "" });
   const [paths, setPaths] = useState({});
   const [message, setMessage] = useState("");
   const [loginId, setLoginId] = useState("");
   const [refreshingIds, setRefreshingIds] = useState(() => new Set());
   const [retryIds, setRetryIds] = useState(() => new Set());
+  const tokenLogsRef = useRef(tokenLogs);
+  const appLogsRef = useRef(appLogs);
 
   async function reload() {
     const data = await api.bootstrap();
@@ -34,6 +37,7 @@ function App() {
     setAccounts(data.accounts);
     setTokenLogs(data.tokenLogs);
     setTokenSummary(data.tokenSummary || { total: {}, byAccount: [] });
+    setDashboardSummary(data.tokenSummary || { total: {}, byAccount: [] });
     setAppLogs(data.appLogs);
     setGateway(data.gateway);
     setPaths(data.paths);
@@ -42,6 +46,67 @@ function App() {
 
   useEffect(() => {
     reload().catch((error) => setMessage(error.message));
+  }, []);
+
+  useEffect(() => {
+    tokenLogsRef.current = tokenLogs;
+  }, [tokenLogs]);
+
+  useEffect(() => {
+    appLogsRef.current = appLogs;
+  }, [appLogs]);
+
+  useEffect(() => {
+    if (!api.onGatewayStatusChanged) return undefined;
+    return api.onGatewayStatusChanged((status) => {
+      setGateway(status);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!api.onDataChanged) return undefined;
+    let timer = null;
+    const pending = new Set();
+    const unsubscribe = api.onDataChanged((types) => {
+      for (const type of types || []) pending.add(type);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const next = new Set(pending);
+        pending.clear();
+        try {
+          if (next.has("accounts")) {
+            setAccounts(await api.listAccounts());
+          }
+          if (next.has("tokenLogs") || next.has("tokenSummary")) {
+            const current = tokenLogsRef.current || {};
+            const query = {
+              page: current.page || 1,
+              pageSize: current.pageSize || 10,
+              startAt: current.startAt,
+              endAt: current.endAt
+            };
+            setTokenLogs(await api.listTokenLogs(query));
+            setTokenSummary(await api.tokenSummary(query));
+            setDashboardSummary(await api.tokenSummary());
+          }
+          if (next.has("appLogs")) {
+            const current = appLogsRef.current || {};
+            setAppLogs(await api.listAppLogs({
+              page: current.page || 1,
+              pageSize: current.pageSize || 10,
+              startAt: current.startAt,
+              endAt: current.endAt
+            }));
+          }
+        } catch (error) {
+          setMessage(`自动刷新失败：${error.message}`);
+        }
+      }, 150);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -87,6 +152,16 @@ function App() {
     }
   }
 
+  async function importLocalCodexAccount() {
+    try {
+      const account = await api.importLocalCodexAccount();
+      await reload();
+      setMessage(`已导入账号：${account.name}`);
+    } catch (error) {
+      setMessage(`本地读取失败：${error.message}`);
+    }
+  }
+
   async function refreshUsage(account) {
     setRefreshingIds((prev) => new Set(prev).add(account.id));
     try {
@@ -113,9 +188,19 @@ function App() {
   async function refreshAllUsage() {
     setMessage("正在刷新所有账号额度...");
     try {
-      await api.refreshAllUsage();
+      const results = await api.refreshAllUsage();
       await reload();
-      setMessage("所有账号额度刷新完成");
+      const okCount = results.filter((item) => item.ok).length;
+      const failCount = results.length - okCount;
+      if (results.length === 0) {
+        setMessage("没有可刷新的启用账号");
+      } else if (failCount === 0) {
+        setMessage("所有账号额度刷新完成");
+      } else if (okCount === 0) {
+        setMessage(`刷新全部失败：${failCount}/${results.length} 个账号失败`);
+      } else {
+        setMessage(`部分账号刷新成功：${okCount}/${results.length}，失败 ${failCount} 个`);
+      }
     } catch (error) {
       setMessage(`刷新全部失败：${error.message}`);
     }
@@ -154,12 +239,13 @@ function App() {
       <section className="content">
         {message && <div className="toast" role="status">{message}</div>}
 
-        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} tokenSummary={tokenSummary} />}
+        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} tokenSummary={dashboardSummary} />}
         {page === "accounts" && (
           <AccountsPage
             accounts={accounts}
             loginId={loginId}
             onStartLogin={startLogin}
+            onImportLocal={importLocalCodexAccount}
             onCancelLogin={() => {
               setLoginId("");
               setMessage("已取消等待授权");
@@ -218,7 +304,7 @@ function App() {
 }
 
 function Dashboard({ accounts, gateway, tokenSummary }) {
-  const usable = accounts.filter((item) => item.enabled && item.status === "active" && item.access_token).length;
+  const usable = accounts.filter(isUsableAccount).length;
   const total = tokenSummary?.total || {};
   return (
     <section className="panel">
@@ -244,7 +330,21 @@ function Dashboard({ accounts, gateway, tokenSummary }) {
   );
 }
 
-function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin, onCancelLogin, onRefreshUsage, onRefreshAll, onSetEnabled, onDelete }) {
+function isUsableAccount(account) {
+  if (!account) return false;
+  if (!account.enabled || account.status !== "active" || !account.access_token) return false;
+  if (isSubscriptionExpired(account)) return false;
+  return ![account.quota_5h_used_percent, account.quota_7d_used_percent]
+    .some((value) => Number(value || 0) >= 100);
+}
+
+function isSubscriptionExpired(account) {
+  const expiresAt = Number(account.subscription_expires_at || 0);
+  return expiresAt > 0 && expiresAt <= Math.floor(Date.now() / 1000);
+}
+
+function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin, onImportLocal, onCancelLogin, onRefreshUsage, onRefreshAll, onSetEnabled, onDelete }) {
+  const [showAddOptions, setShowAddOptions] = useState(false);
   return (
     <section className="panel">
       <div className="section-title">
@@ -253,18 +353,48 @@ function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin
           <p className="subtle">通过浏览器授权登录，应用自动保存 token 到本地 SQLite。</p>
         </div>
         <div className="actions-inline">
-          <button className="primary" onClick={onStartLogin} disabled={Boolean(loginId)}>{loginId ? "等待授权..." : "浏览器登录"}</button>
-          <button onClick={onRefreshAll}>刷新全部额度</button>
+          <button className="primary" onClick={() => setShowAddOptions(true)} disabled={Boolean(loginId)}>
+            {loginId ? "等待授权..." : "添加账号"}
+          </button>
           {loginId && <button onClick={onCancelLogin}>取消</button>}
+          <button onClick={onRefreshAll}>刷新全部</button>
         </div>
       </div>
+      {showAddOptions && !loginId && (
+        <div className="modal-backdrop" onClick={() => setShowAddOptions(false)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="add-account-title" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <h3 id="add-account-title">添加账号</h3>
+              <button className="modal-close" type="button" aria-label="关闭" onClick={() => setShowAddOptions(false)}>×</button>
+            </div>
+            <div className="modal-actions">
+              <button
+                className="primary"
+                onClick={() => {
+                  setShowAddOptions(false);
+                  onStartLogin();
+                }}
+              >
+                浏览器认证
+              </button>
+              <button
+                onClick={() => {
+                  setShowAddOptions(false);
+                  onImportLocal();
+                }}
+              >
+                本地读取
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="account-grid">
         {accounts.map((account) => (
           <article className="account-card" key={account.id}>
             <div className="account-head">
               <div>
                 <h3>{account.name}</h3>
-                <p>{account.email || account.account_id || "未读取到账户标识"}</p>
               </div>
               <span className={account.enabled ? "pill ok" : "pill"}>{account.enabled ? "启用" : "停用"}</span>
             </div>
@@ -277,13 +407,13 @@ function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin
                 {account.enabled ? "停用" : "启用"}
               </button>
               <button onClick={() => onRefreshUsage(account)} disabled={refreshingIds.has(account.id)}>
-                {refreshingIds.has(account.id) ? "刷新中..." : retryIds.has(account.id) ? "重试刷新" : "刷新额度"}
+                {refreshingIds.has(account.id) ? "刷新中..." : retryIds.has(account.id) ? "重试刷新" : "刷新"}
               </button>
               <button className="danger ghost" onClick={() => onDelete(account.id)}>删除</button>
             </div>
           </article>
         ))}
-        {accounts.length === 0 && <div className="empty">还没有账号。点击“浏览器登录”完成 ChatGPT/Codex 授权。</div>}
+        {accounts.length === 0 && <div className="empty">还没有账号。点击“添加账号”完成 ChatGPT/Codex 授权。</div>}
       </div>
     </section>
   );
@@ -340,32 +470,35 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
       {mode === "gateway" && (
         <div className="auth-preview-grid">
           <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: settings.gateway_api_key || "" }, null, 2)} />
-          <CodePreview title="config.toml provider" value={providerToml(settings)} />
+          <CodePreview title="config.toml" value={providerToml(settings)} />
         </div>
       )}
       {mode === "account" && (
         <div className="account-picker">
-          {accounts.map((account) => (
-            <button
-              type="button"
-              key={account.id}
-              className={`${accountId === account.id ? "picker-option active" : "picker-option"}${settings.codex_auth_mode === "account" && settings.codex_selected_account_id === account.id ? " current" : ""}${account.enabled ? "" : " disabled"}`}
-              onClick={() => setAccountId(account.id)}
-              disabled={!account.enabled}
-            >
-              {settings.codex_auth_mode === "account" && settings.codex_selected_account_id === account.id && <small>当前</small>}
-              <strong>{account.email || "未读取邮箱"}</strong>
-              <span className="account-option-meta">
-                <em className="account-state">{account.enabled ? "启用" : "停用"}</em>
-              </span>
-            </button>
-          ))}
+          {accounts.map((account) => {
+            const usable = isUsableAccount(account);
+            return (
+              <button
+                type="button"
+                key={account.id}
+                className={`${accountId === account.id ? "picker-option active" : "picker-option"}${settings.codex_auth_mode === "account" && settings.codex_selected_account_id === account.id ? " current" : ""}${usable ? "" : " unavailable"}`}
+                onClick={() => setAccountId(account.id)}
+                disabled={!usable}
+              >
+                {settings.codex_auth_mode === "account" && settings.codex_selected_account_id === account.id && <small>当前</small>}
+                <strong>{account.name || "未命名账号"}</strong>
+                <span className="account-option-meta">
+                  <em className="account-state">{usable ? "可用" : "不可用"}</em>
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
       {mode === "account" && accounts.length === 0 && <div className="empty">还没有账号，请先到账号管理完成浏览器登录。</div>}
       {!alreadyApplied && (
         <div className="actions-inline">
-          <button className="primary" type="button" onClick={apply} disabled={busy || !mode || (mode === "account" && (!accountId || !selectedAccount?.enabled))}>
+          <button className="primary" type="button" onClick={apply} disabled={busy || !mode || (mode === "account" && (!accountId || !isUsableAccount(selectedAccount)))}>
             {busy ? "写入中..." : "应用到 Codex"}
           </button>
         </div>
@@ -448,17 +581,20 @@ function SettingsPage({ settings, paths, onSave }) {
       <ControlledField name="upstream_base_url" label="上游地址" value={draft.upstream_base_url} onChange={setField} />
       <ControlledField name="request_timeout_ms" label="请求超时 ms（0 为不限制）" value={draft.request_timeout_ms} type="number" onChange={setField} />
       <ControlledField name="usage_refresh_interval_secs" label="账号额度定时刷新间隔（秒，0 为关闭）" value={draft.usage_refresh_interval_secs} type="number" onChange={setField} />
-      <label className="setting-toggle">
-        <span>
-          <strong>自动启动网关</strong>
-          <small>应用打开后自动监听本地网关端口。</small>
-        </span>
-        <input
-          type="checkbox"
-          checked={draft.auto_start_gateway === "true"}
-          onChange={(event) => setField("auto_start_gateway", event.target.checked ? "true" : "false")}
-        />
-      </label>
+      <div className="field">
+        <span>自动启动网关</span>
+        <div className="segmented">
+          <button type="button" className={draft.auto_start_gateway === "true" ? "active" : ""} onClick={() => setField("auto_start_gateway", "true")}>开启</button>
+          <button type="button" className={draft.auto_start_gateway !== "true" ? "active" : ""} onClick={() => setField("auto_start_gateway", "false")}>关闭</button>
+        </div>
+      </div>
+      <div className="field">
+        <span>关闭窗口时</span>
+        <div className="segmented">
+          <button type="button" className={(draft.close_behavior || "exit") === "exit" ? "active" : ""} onClick={() => setField("close_behavior", "exit")}>退出应用</button>
+          <button type="button" className={draft.close_behavior === "tray" ? "active" : ""} onClick={() => setField("close_behavior", "tray")}>最小化到托盘</button>
+        </div>
+      </div>
       <div>
         <button className="primary" type="submit">保存配置</button>
       </div>
@@ -512,13 +648,14 @@ function CallRecordsPage({ pageData, summary, onQuery }) {
         </div>
       )}
       <table>
-        <thead><tr><th>时间</th><th>账号</th><th>路径</th><th>状态</th><th>耗时</th><th>输入</th><th>缓存</th><th>输出</th><th>总计</th></tr></thead>
+        <thead><tr><th>时间</th><th>账号</th><th>客户端路径</th><th>上游路径</th><th>状态</th><th>耗时</th><th>输入</th><th>缓存</th><th>输出</th><th>总计</th></tr></thead>
         <tbody>
           {pageData.items.map((log) => (
             <tr key={log.id}>
               <td>{formatTime(log.created_at)}</td>
               <td>{log.account_name || log.account_id || "-"}</td>
-              <td>{log.path}</td>
+              <td className="url-cell" title={log.request_path || ""}>{log.request_path || "-"}</td>
+              <td className="url-cell" title={log.upstream_path || ""}>{log.upstream_path || "-"}</td>
               <td>{log.status || "-"}</td>
               <td>{log.duration_ms ? `${log.duration_ms} ms` : "-"}</td>
               <td>{log.input_tokens || 0}</td>
@@ -555,7 +692,7 @@ function AppLogsPage({ pageData, onQuery }) {
               <td>{log.scope || "-"}</td>
               <td>{log.action || "-"}</td>
               <td>{log.status || "-"}</td>
-              <td>{log.message || ""}</td>
+              <td className="message-cell" title={log.message || ""}>{log.message || ""}</td>
             </tr>
           ))}
         </tbody>
@@ -585,7 +722,7 @@ function LogFilters({ query, setField, onSearch }) {
 }
 
 function Pager({ pageData, query, onPageSize, onPrev, onNext }) {
-  const totalPages = Math.max(1, Math.ceil((pageData.total || 0) / (pageData.pageSize || 20)));
+  const totalPages = Math.max(1, Math.ceil((pageData.total || 0) / (pageData.pageSize || 10)));
   return (
     <div className="pager">
       <span>共 {pageData.total || 0} 条，第 {pageData.page || 1}/{totalPages} 页</span>
@@ -602,7 +739,7 @@ function Pager({ pageData, query, onPageSize, onPrev, onNext }) {
 }
 
 function usePagedQuery(onQuery, pageData) {
-  const [query, setQuery] = useState(() => todayQuery(pageData.pageSize || 20));
+  const [query, setQuery] = useState(() => todayQuery(pageData.pageSize || 10));
   function setField(key, value) {
     setQuery((prev) => ({ ...prev, [key]: value }));
   }
@@ -626,7 +763,10 @@ function usePagedQuery(onQuery, pageData) {
 }
 
 function Metric({ title, value }) {
-  return <article className="panel metric"><span>{title}</span><strong>{value}</strong></article>;
+  const displayValue = typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value))
+    ? String(value).replace(/\B(?=(\d{4})+(?!\d))/g, ",")
+    : value;
+  return <article className="panel metric"><span>{title}</span><strong>{displayValue}</strong></article>;
 }
 
 function Field({ label, name, value, type = "text", secret }) {
@@ -684,13 +824,13 @@ function providerToml(settings) {
     'model_provider = "codex_gateway"',
     "",
     "[model_providers.codex_gateway]",
-    'name = "Codex Gateway"',
+    'name = "OpenAI"',
     `base_url = "http://${host}:${port}/v1"`,
     'wire_api = "responses"'
   ].join("\n");
 }
 
-function todayQuery(pageSize = 20) {
+function todayQuery(pageSize = 10) {
   const today = new Date();
   const value = toDateInput(today);
   return { startDate: value, endDate: value, page: 1, pageSize };
@@ -702,7 +842,7 @@ function toLogQuery(query) {
   end.setDate(end.getDate() + 1);
   return {
     page: Number(query.page || 1),
-    pageSize: Number(query.pageSize || 20),
+    pageSize: Number(query.pageSize || 10),
     startAt: Math.floor(start.getTime() / 1000),
     endAt: Math.floor(end.getTime() / 1000)
   };

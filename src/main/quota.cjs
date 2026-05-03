@@ -22,10 +22,23 @@ function normalizeUsagePayload(payload) {
     || root.gpt5 || root.codex || root.five_hour || root["5h"] || root.window_5h || {};
   const sevenDay = windows.find((item) => Number(item.limit_window_seconds) === 604800)
     || root.gpt5_weekly || root.weekly || root.seven_day || root["7d"] || root.window_7d || {};
+
+  const isLimitReached = root.rate_limit?.limit_reached === true || root.rate_limit?.allowed === false;
+  let fiveHourUsed = readUsedPercent(fiveHour) ?? Number(root.quota_5h_used_percent ?? root.used_percent ?? 0);
+  let sevenDayUsed = readUsedPercent(sevenDay) ?? Number(root.quota_7d_used_percent ?? 0);
+
+  if (isLimitReached) {
+    fiveHourUsed = 100;
+    sevenDayUsed = 100;
+  } else {
+    if (fiveHourUsed >= 99) fiveHourUsed = 100;
+    if (sevenDayUsed >= 99) sevenDayUsed = 100;
+  }
+
   return {
-    quota_5h_used_percent: readUsedPercent(fiveHour) ?? Number(root.quota_5h_used_percent ?? root.used_percent ?? 0),
+    quota_5h_used_percent: fiveHourUsed,
     quota_5h_reset_at: timestampFrom(fiveHour.resets_at ?? fiveHour.reset_at ?? root.quota_5h_reset_at),
-    quota_7d_used_percent: readUsedPercent(sevenDay) ?? Number(root.quota_7d_used_percent ?? 0),
+    quota_7d_used_percent: sevenDayUsed,
     quota_7d_reset_at: timestampFrom(sevenDay.resets_at ?? sevenDay.reset_at ?? root.quota_7d_reset_at),
     raw_usage_json: JSON.stringify(payload ?? {})
   };

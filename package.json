@@ -28,6 +28,7 @@
   "build": {
     "appId": "io.github.jadchene.codex-gateway",
     "productName": "Codex Gateway",
+    "executableName": "Codex Gateway",
     "directories": {
       "output": "release"
     },

@@ -1,14 +1,17 @@
+const http = require("node:http");
 const crypto = require("node:crypto");
 
 const DEFAULT_ISSUER = "https://auth.openai.com";
 const DEFAULT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEFAULT_ORIGINATOR = "codex_cli_rs";
+const LOGIN_HOST = "localhost";
+const LOGIN_PORT = 1455;
 
 function createAuthService(store, ensureGatewayStarted, refreshAccountUsage) {
+  let loginServer = null;
+
   async function startLogin() {
-    await ensureGatewayStarted();
-    const settings = store.getSettings();
-    const redirectUri = `http://localhost:${settings.gateway_port || "8436"}/auth/callback`;
+    const redirectUri = await ensureLoginServer();
     const pkce = generatePkce();
     const state = generateState();
     store.saveLoginSession({
@@ -27,6 +30,34 @@ function createAuthService(store, ensureGatewayStarted, refreshAccountUsage) {
         state
       })
     };
+  }
+
+  async function ensureLoginServer() {
+    if (loginServer) return loginRedirectUri();
+    loginServer = http.createServer((req, res) => handleLoginServerRequest(req, res));
+    try {
+      await new Promise((resolve, reject) => {
+        loginServer.once("error", reject);
+        loginServer.listen(LOGIN_PORT, LOGIN_HOST, resolve);
+      });
+    } catch (error) {
+      loginServer = null;
+      throw new Error(`启动登录回调服务失败（${loginRedirectUri()}）：${error.message}`);
+    }
+    return loginRedirectUri();
+  }
+
+  async function handleLoginServerRequest(req, res) {
+    const parsedUrl = new URL(req.url || "/", loginRedirectUri());
+    if (req.method !== "GET" || parsedUrl.pathname !== "/auth/callback") {
+      return sendHtml(res, 404, "Codex Gateway", "未找到登录回调地址。");
+    }
+    try {
+      await completeCallback(parsedUrl.searchParams);
+      return sendHtml(res, 200, "登录成功", "账号已保存，可以关闭这个浏览器页面并回到 Codex Gateway。");
+    } catch (error) {
+      return sendHtml(res, 500, "登录失败", String(error?.message || error));
+    }
   }
 
   async function completeCallback(params) {
@@ -49,12 +80,28 @@ function createAuthService(store, ensureGatewayStarted, refreshAccountUsage) {
         code
       });
       const account = accountFromTokens(tokens);
-      store.saveAccount(account);
+      const saved = store.saveAccount(account);
       if (refreshAccountUsage) {
-        refreshAccountUsage(account.id).catch(() => {});
+        try {
+          const refreshed = await refreshAccountUsage(saved.id);
+          store.addAppLog({
+            scope: "usage",
+            action: "refresh-account",
+            status: "success",
+            message: `浏览器认证后已刷新额度：${refreshed.name}`
+          });
+        } catch (error) {
+          store.addAppLog({
+            level: "error",
+            scope: "usage",
+            action: "refresh-account",
+            status: "failed",
+            message: `浏览器认证后刷新额度失败：${saved.name}: ${error.message}`
+          });
+        }
       }
       store.updateLoginSession(state, "success", null);
-      return account;
+      return store.listAccounts().find((item) => item.id === saved.id) || saved;
     } catch (error) {
       store.updateLoginSession(state, "failed", error.message);
       throw error;
@@ -65,7 +112,18 @@ function createAuthService(store, ensureGatewayStarted, refreshAccountUsage) {
     return store.getLoginSession(loginId) || { status: "unknown", error: null };
   }
 
-  return { startLogin, completeCallback, loginStatus };
+  async function stop() {
+    if (!loginServer) return;
+    const closing = loginServer;
+    loginServer = null;
+    await new Promise((resolve) => closing.close(resolve));
+  }
+
+  return { startLogin, completeCallback, loginStatus, stop };
+}
+
+function loginRedirectUri() {
+  return `http://${LOGIN_HOST}:${LOGIN_PORT}/auth/callback`;
 }
 
 function generatePkce() {
@@ -92,6 +150,22 @@ function buildAuthorizeUrl({ issuer, clientId, redirectUri, codeChallenge, state
     originator: DEFAULT_ORIGINATOR
   });
   return `${issuer}/oauth/authorize?${query.toString()}`;
+}
+
+function sendHtml(res, status, title, message) {
+  const body = `<!doctype html><meta charset="utf-8"><title>${escapeHtml(title)}</title><body style="font-family:Arial,sans-serif;padding:32px"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p></body>`;
+  res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+  res.end(body);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
 }
 
 async function exchangeCodeForTokens({ issuer, clientId, redirectUri, codeVerifier, code }) {
@@ -173,5 +247,6 @@ function stableId(value) {
 module.exports = {
   createAuthService,
   buildAuthorizeUrl,
+  loginRedirectUri,
   accountFromTokens
 };

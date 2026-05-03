@@ -59,22 +59,59 @@ function ensureProviderConfig(settings) {
   ensureCodexDir();
   const file = configPath();
   const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  const block = gatewayProviderBlock(settings);
+  if (/^\s*\[model_providers\.codex_gateway\]\s*$/m.test(current)) {
+    const next = replaceGatewayProviderBlock(current, block);
+    if (next !== current) {
+      fs.writeFileSync(file, next, "utf8");
+      return true;
+    }
+    return false;
+  }
   if (/^\s*model_provider\s*=/m.test(current) || /^\s*\[model_providers\./m.test(current)) {
     return false;
   }
+  fs.writeFileSync(file, insertProviderBlockIntoConfig(current, block), "utf8");
+  return true;
+}
+
+function gatewayProviderBlock(settings) {
   const host = settings.gateway_host || "localhost";
   const port = settings.gateway_port || "8436";
-  const block = [
+  return [
     'model_provider = "codex_gateway"',
     "",
     "[model_providers.codex_gateway]",
-    'name = "Codex Gateway"',
+    'name = "OpenAI"',
     `base_url = "http://${host}:${port}/v1"`,
     'wire_api = "responses"',
     ""
   ].join("\n");
-  fs.writeFileSync(file, `${current.trimEnd()}\n\n${block}`, "utf8");
-  return true;
+}
+
+function replaceGatewayProviderBlock(current, block) {
+  let next = String(current || "");
+  if (/^\s*model_provider\s*=\s*"codex_gateway"\s*$/m.test(next)) {
+    next = next.replace(/^\s*model_provider\s*=\s*"codex_gateway"\s*\r?\n?/m, "");
+  }
+  next = next.replace(/\r?\n?\[model_providers\.codex_gateway\]\r?\n(?:[^\[\r\n].*\r?\n?)*/m, "\n");
+  next = next.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  return insertProviderBlockIntoConfig(next, block);
+}
+
+function insertProviderBlockIntoConfig(current, block) {
+  const normalizedBlock = `${String(block || "").trimEnd()}\n`;
+  const text = String(current || "");
+  if (!text.trim()) return normalizedBlock;
+  const newline = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  const insertIndex = lines.findIndex((line) => line.trim() === "");
+  if (insertIndex < 0) {
+    return `${text.trimEnd()}${newline}${newline}${normalizedBlock.replace(/\n/g, newline)}`;
+  }
+  const before = lines.slice(0, insertIndex).join(newline);
+  const after = lines.slice(insertIndex + 1).join(newline).replace(/^\r?\n/, "");
+  return `${before}${newline}${newline}${normalizedBlock.replace(/\n/g, newline)}${newline}${after}`;
 }
 
 function removeGatewayProviderConfig() {
@@ -158,6 +195,9 @@ module.exports = {
   applyGatewayMode,
   applyAccountMode,
   ensureProviderConfig,
+  gatewayProviderBlock,
+  insertProviderBlockIntoConfig,
+  replaceGatewayProviderBlock,
   removeGatewayProviderConfig,
   detectCodexAuthMode,
   repairConfigSpacing
