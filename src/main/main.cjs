@@ -259,18 +259,27 @@ async function refreshAllUsage(reason = "manual") {
   for (const account of accounts) {
     try {
       await refreshUsage(account.id);
-      results.push({ id: account.id, ok: true });
+      results.push({ id: account.id, label: account.email || account.name || account.id, ok: true });
     } catch (error) {
-      results.push({ id: account.id, ok: false, message: error.message });
+      results.push({ id: account.id, label: account.email || account.name || account.id, ok: false, message: error.message });
     }
   }
+  const okCount = results.filter((item) => item.ok).length;
+  const failed = results.filter((item) => !item.ok);
+  const detail = failed.length > 0
+    ? `；失败：${failed.map((item) => `${item.label}: ${compactError(item.message)}`).join(" | ")}`
+    : "";
   store.addAppLog({
     scope: "usage",
     action: "refresh-all",
     status: results.some((item) => item.ok) ? "success" : "failed",
-    message: `${reason}: ${results.filter((item) => item.ok).length}/${results.length} refreshed`
+    message: `${reason}: ${okCount}/${results.length} refreshed${detail}`
   });
   return results;
+}
+
+function compactError(value) {
+  return String(value || "").replace(/\s+/g, " ").slice(0, 360);
 }
 
 async function requestUsage(endpoint, account) {
