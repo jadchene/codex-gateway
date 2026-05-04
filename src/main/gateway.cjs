@@ -46,9 +46,13 @@ async function handleRequest(req, res, store, authService, hooks) {
   if (req.method === "GET" && pathname === "/auth/callback") {
     return handleAuthCallback(parsedUrl, res, authService);
   }
-  const allowedPaths = ["/v1/models", "/v1/responses", "/v1/responses/compact"];
-  if (!allowedPaths.includes(pathname)) {
+  const route = matchGatewayRoute(req.method, pathname);
+  if (!route.pathAllowed) {
     return sendJson(res, 404, { error: { message: "Unrecognized request URL." } });
+  }
+  if (!route.methodAllowed) {
+    res.setHeader("allow", route.allowedMethods.join(", "));
+    return sendJson(res, 405, { error: { message: "Method not allowed." } });
   }
   const auth = req.headers.authorization || "";
   const localKey = settings.gateway_api_key || "";
@@ -130,6 +134,22 @@ async function handleRequest(req, res, store, authService, hooks) {
     const clientMessage = error?.name === "AbortError" ? "Request timed out." : "The server encountered a temporary error and could not complete your request.";
     sendJson(res, 502, { error: { message: clientMessage } });
   }
+}
+
+const GATEWAY_ROUTES = {
+  "/v1/models": ["GET"],
+  "/v1/responses": ["POST"],
+  "/v1/responses/compact": ["POST"]
+};
+
+function matchGatewayRoute(method, pathname) {
+  const allowedMethods = GATEWAY_ROUTES[pathname] || [];
+  const normalizedMethod = String(method || "").toUpperCase();
+  return {
+    pathAllowed: allowedMethods.length > 0,
+    methodAllowed: allowedMethods.includes(normalizedMethod),
+    allowedMethods
+  };
 }
 
 function headerValue(value) {
@@ -396,9 +416,22 @@ function pathFromUrl(value) {
 
 function buildUpstreamHeaders(headers, account, hasBody = false, path = "") {
   const outgoing = {};
+  const discardedHeaders = new Set([
+    "host",
+    "connection",
+    "content-length",
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "openai-organization",
+    "openai-project",
+    "origin",
+    "referer",
+    "accept-encoding"
+  ]);
   for (const [key, value] of Object.entries(headers)) {
     const lower = key.toLowerCase();
-    if (["host", "connection", "content-length", "authorization"].includes(lower)) continue;
+    if (discardedHeaders.has(lower)) continue;
     outgoing[key] = value;
   }
   setHeader(outgoing, "Authorization", `Bearer ${account.access_token}`);
@@ -453,6 +486,7 @@ module.exports = {
   buildUpstreamUrl,
   buildUpstreamHeaders,
   buildGatewayRequest,
+  matchGatewayRoute,
   extractTokenUsage,
   isQuotaExhaustedResponse,
   isAuthExpiredResponse

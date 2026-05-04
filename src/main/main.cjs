@@ -59,6 +59,7 @@ app.whenReady().then(async () => {
   gateway = createGateway(store, authService, { refreshAllUsage, refreshAccountToken: refreshGatewayAccountToken });
   registerIpc();
   scheduleUsageRefresh("startup");
+  checkUsageRefreshOnStartup();
   checkStaleQuotasOnStartup();
   if (store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
@@ -592,6 +593,48 @@ function scheduleUsageRefresh(reason = "settings-save") {
   });
 }
 
+function checkUsageRefreshOnStartup() {
+  const settings = store.getSettings();
+  const intervalSecs = Number(settings.usage_refresh_interval_secs || 900);
+  if (!Number.isFinite(intervalSecs) || intervalSecs <= 0) {
+    store.addAppLog({
+      scope: "usage",
+      action: "startup-refresh-check",
+      status: "disabled",
+      message: `启动时跳过账号额度补刷检查：间隔为 ${settings.usage_refresh_interval_secs || 0}`
+    });
+    return;
+  }
+  const effectiveIntervalSecs = Math.max(60, intervalSecs);
+  const now = Math.floor(Date.now() / 1000);
+  const lastRefreshAt = Number(store.getLastRefreshAllUsageAt?.() || 0);
+  if (lastRefreshAt > 0 && now - lastRefreshAt < effectiveIntervalSecs) {
+    store.addAppLog({
+      scope: "usage",
+      action: "startup-refresh-check",
+      status: "fresh",
+      message: `启动时账号额度无需补刷：上次刷新全部额度时间 ${formatTime(lastRefreshAt)}`
+    });
+    return;
+  }
+  const elapsed = lastRefreshAt > 0 ? `${now - lastRefreshAt} 秒` : "无记录";
+  store.addAppLog({
+    scope: "usage",
+    action: "startup-refresh-check",
+    status: "start",
+    message: `启动时检测到刷新全部额度已超过配置间隔，开始自动刷新：上次刷新 ${elapsed}，间隔 ${effectiveIntervalSecs} 秒`
+  });
+  refreshAllUsage("startup-expired").catch((error) => {
+    store.addAppLog({
+      level: "error",
+      scope: "usage",
+      action: "startup-refresh-check",
+      status: "failed",
+      message: `启动时自动刷新全部额度失败：${compactError(error.message)}`
+    });
+  });
+}
+
 function checkStaleQuotasOnStartup() {
   const now = Math.floor(Date.now() / 1000);
   const accounts = store.listAccounts().filter((account) => account.enabled && account.access_token);
@@ -770,6 +813,7 @@ async function refreshAllUsage(reason = "manual") {
     status: results.some((item) => item.ok) ? "success" : "failed",
     message: `${reason}: ${okCount}/${results.length} refreshed${detail}`
   });
+  store.saveSettings({ last_usage_refresh_all_at: Math.floor(Date.now() / 1000) });
   return results;
 }
 

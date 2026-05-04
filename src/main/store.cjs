@@ -30,6 +30,7 @@ function createStore() {
     addTokenLog: (entry) => addTokenLog(db, entry),
     clearTokenLogs: () => clearTokenLogs(db),
     tokenSummary: (query) => tokenSummary(db, query),
+    getLastRefreshAllUsageAt: () => getLastRefreshAllUsageAt(db),
     listAppLogs: (query) => listAppLogs(db, query),
     addAppLog: (entry) => addAppLog(db, entry),
     clearAppLogs: () => clearAppLogs(db)
@@ -122,6 +123,7 @@ function migrate(db) {
     upstream_base_url: "https://chatgpt.com/backend-api/codex",
     request_timeout_ms: "0",
     usage_refresh_interval_secs: "900",
+    last_usage_refresh_all_at: "0",
     auto_start_gateway: "false",
     close_behavior: "exit",
     codex_auth_mode: "gateway",
@@ -399,6 +401,19 @@ function addAppLog(db, entry) {
     message: String(entry.message || ""),
     created_at: now()
   });
+}
+
+function getLastRefreshAllUsageAt(db) {
+  const setting = db.prepare("SELECT value FROM settings WHERE key = ?").get("last_usage_refresh_all_at");
+  const settingTime = Number(setting?.value || 0);
+  if (Number.isFinite(settingTime) && settingTime > 0) return Math.trunc(settingTime);
+  const row = db.prepare(`
+    SELECT MAX(created_at) AS created_at
+    FROM app_logs
+    WHERE scope = 'usage' AND action = 'refresh-all'
+  `).get();
+  const logTime = Number(row?.created_at || 0);
+  return Number.isFinite(logTime) ? Math.trunc(logTime) : 0;
 }
 
 function clearAppLogs(db) {

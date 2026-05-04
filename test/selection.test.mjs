@@ -12,7 +12,8 @@ const {
   buildUpstreamUrl,
   extractTokenUsage,
   isAuthExpiredResponse,
-  isQuotaExhaustedResponse
+  isQuotaExhaustedResponse,
+  matchGatewayRoute
 } = require("../src/main/gateway.cjs");
 
 test("pickGatewayAccount chooses enabled token account with lowest quota usage", () => {
@@ -138,7 +139,14 @@ test("buildUpstreamHeaders sends Codex account auth headers", () => {
       originator: "codex_cli_rs",
       "content-type": "application/json",
       accept: "text/event-stream",
-      "x-random-client-header": "drop"
+      "x-random-client-header": "keep",
+      cookie: "sid=client",
+      "proxy-authorization": "Bearer proxy",
+      "openai-organization": "org_client",
+      "openai-project": "proj_client",
+      origin: "http://127.0.0.1:8436",
+      referer: "http://127.0.0.1:8436/",
+      "accept-encoding": "gzip"
     },
     { access_token: "upstream-token", account_id: "acc_123" },
     true,
@@ -153,7 +161,14 @@ test("buildUpstreamHeaders sends Codex account auth headers", () => {
   assert.equal(headers["x-codex-turn-state"], "state");
   assert.equal(headers.host, undefined);
   assert.equal(headers.authorization, undefined);
-  assert.equal(headers["x-random-client-header"], "drop");
+  assert.equal(headers["x-random-client-header"], "keep");
+  assert.equal(headers.cookie, undefined);
+  assert.equal(headers["proxy-authorization"], undefined);
+  assert.equal(headers["openai-organization"], undefined);
+  assert.equal(headers["openai-project"], undefined);
+  assert.equal(headers.origin, undefined);
+  assert.equal(headers.referer, undefined);
+  assert.equal(headers["accept-encoding"], undefined);
 });
 
 test("buildUpstreamHeaders only replaces local auth and account headers", () => {
@@ -179,6 +194,24 @@ test("buildGatewayRequest keeps compact endpoint path", () => {
   );
   assert.equal(request.path, "/v1/responses/compact");
   assert.equal(request.upstreamUrl, "https://chatgpt.com/backend-api/codex/responses/compact");
+});
+
+test("matchGatewayRoute validates both path and method", () => {
+  assert.deepEqual(matchGatewayRoute("GET", "/v1/models"), {
+    pathAllowed: true,
+    methodAllowed: true,
+    allowedMethods: ["GET"]
+  });
+  assert.deepEqual(matchGatewayRoute("GET", "/v1/responses"), {
+    pathAllowed: true,
+    methodAllowed: false,
+    allowedMethods: ["POST"]
+  });
+  assert.deepEqual(matchGatewayRoute("POST", "/v1/unknown"), {
+    pathAllowed: false,
+    methodAllowed: false,
+    allowedMethods: []
+  });
 });
 
 test("extractTokenUsage uses latest SSE usage instead of summing cumulative events", () => {
