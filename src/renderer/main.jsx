@@ -370,7 +370,7 @@ function Dashboard({ accounts, gateway, tokenSummary }) {
       <div className="dashboard-grid">
         <Metric title="调用次数" value={total.calls || 0} />
         <Metric title="总 Token" value={total.total_tokens || 0} />
-        <Metric title="输入(缓存) Token" value={formatCachedPair(total.input_tokens, total.cached_input_tokens)} hint={actualInputTitle(total.input_tokens, total.cached_input_tokens)} />
+        <Metric title="输入(未命中) Token" value={formatUncachedPair(total.input_tokens, total.cached_input_tokens)} hint={cachedInputTitle(total.cached_input_tokens)} />
         <Metric title="输出 Token" value={total.output_tokens || 0} />
       </div>
     </section>
@@ -726,14 +726,14 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
                 <strong>{item.account_name}</strong>
                 <b>总计: {formatTokenNumber(item.total_tokens)}</b>
               </div>
-              <small title={actualInputTitle(item.input_tokens, item.cached_input_tokens)}>输入{formatTokenNumber(item.input_tokens)}(缓存{formatTokenNumber(item.cached_input_tokens)})/输出{formatTokenNumber(item.output_tokens)}</small>
+              <small title={cachedInputTitle(item.cached_input_tokens)}>输入{formatTokenNumber(item.input_tokens)}(未命中{formatUncachedInput(item.input_tokens, item.cached_input_tokens)})/输出{formatTokenNumber(item.output_tokens)}</small>
             </button>
           ))}
         </div>
       )}
       <div className="table-wrap">
         <table>
-          <thead><tr><th>时间</th><th>账号</th><th>会话 ID</th><th>客户端路径</th><th>状态</th><th>耗时</th><th>输入(缓存)</th><th>输出</th><th>总计</th></tr></thead>
+          <thead><tr><th>时间</th><th>账号</th><th>会话 ID</th><th>客户端路径</th><th>状态</th><th>耗时</th><th>输入(未命中)</th><th>输出</th><th>总计</th></tr></thead>
           <tbody>
             {pageData.items.map((log) => (
               <tr key={log.id}>
@@ -762,7 +762,7 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
                 <td className="url-cell" title={log.request_path || ""}>{log.request_path || "-"}</td>
                 <td>{log.status || "-"}</td>
                 <td>{log.duration_ms ? `${log.duration_ms} ms` : "-"}</td>
-                <td title={actualInputTitle(log.input_tokens, log.cached_input_tokens)}>{formatCachedPair(log.input_tokens, log.cached_input_tokens)}</td>
+                <td title={cachedInputTitle(log.cached_input_tokens)}>{formatUncachedPair(log.input_tokens, log.cached_input_tokens)}</td>
                 <td>{formatTokenNumber(log.output_tokens)}</td>
                 <td>{formatTokenNumber(log.total_tokens)}</td>
               </tr>
@@ -925,12 +925,16 @@ function formatTime(value) {
   return date.toLocaleString();
 }
 
-function formatCachedPair(input, cached) {
-  return `${formatTokenNumber(input)}(${formatTokenNumber(cached)})`;
+function formatUncachedPair(input, cached) {
+  return `${formatTokenNumber(input)}(${formatUncachedInput(input, cached)})`;
 }
 
-function actualInputTitle(input, cached) {
-  return `实际输入：${formatTokenNumber(Math.max(0, Number(input || 0) - Number(cached || 0)))}`;
+function formatUncachedInput(input, cached) {
+  return formatTokenNumber(Math.max(0, Number(input || 0) - Number(cached || 0)));
+}
+
+function cachedInputTitle(cached) {
+  return `缓存：${formatTokenNumber(cached)}`;
 }
 
 function formatTokenNumber(value) {
