@@ -729,7 +729,7 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(140px, 1fr)) auto;
   gap: 10px;
-  align-items: end;
+  align-items: start;
   margin-bottom: 14px;
 }
 
@@ -739,18 +739,27 @@ textarea {
 
 .filter-action {
   display: grid;
-  gap: 6px;
+  padding-top: 24px;
 }
 
 .filter-action span {
-  visibility: hidden;
-  color: #344054;
-  font-size: 13px;
-  font-weight: 600;
+  display: none;
+}
+
+.filter-row .field span {
+  line-height: 18px;
+}
+
+.filter-row input {
+  height: 38px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .filter-action button {
-  height: 39px;
+  height: 38px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .pager {
@@ -943,8 +952,8 @@ td {
 }
 
 .app-log-table .status-col {
-  width: 62px;
-  max-width: 62px;
+  width: 93px;
+  max-width: 93px;
   white-space: nowrap;
 }
 

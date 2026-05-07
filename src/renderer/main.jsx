@@ -734,9 +734,13 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
             >
               <div className="summary-main">
                 <strong>{item.account_name}</strong>
-                <b>总计: {formatTokenNumber(item.total_tokens)}</b>
+                <b title={`总计：${formatTokenNumber(item.total_tokens)}`}>总计: {formatCompactNumber(item.total_tokens)}</b>
               </div>
-              <small title={cachedInputTitle(item.cached_input_tokens)}>输入{formatTokenNumber(item.input_tokens)}(未命中{formatUncachedInput(item.input_tokens, item.cached_input_tokens)})/输出{formatTokenNumber(item.output_tokens)}</small>
+              <small title={cachedInputTitle(item.cached_input_tokens)}>
+                输入<span title={`输入：${formatTokenNumber(item.input_tokens)}`}>{formatCompactNumber(item.input_tokens)}</span>
+                (未命中<span title={`未命中：${formatUncachedInput(item.input_tokens, item.cached_input_tokens)}`}>{formatCompactUncachedInput(item.input_tokens, item.cached_input_tokens)}</span>)
+                /输出<span title={`输出：${formatTokenNumber(item.output_tokens)}`}>{formatCompactNumber(item.output_tokens)}</span>
+              </small>
             </button>
           ))}
         </div>
@@ -944,10 +948,12 @@ function usePagedQuery(onQuery, pageData) {
 }
 
 function Metric({ title, value, hint }) {
-  const displayValue = typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value))
+  const isPlainNumber = typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value));
+  const displayValue = isPlainNumber
     ? formatTokenNumber(value)
     : value;
-  return <article className="panel metric" title={hint || ""}><span>{title}</span><strong>{displayValue}</strong></article>;
+  const titleText = hint || "";
+  return <article className="panel metric" title={titleText}><span>{title}</span><strong>{displayValue}</strong></article>;
 }
 
 function Field({ label, name, value, type = "text", secret }) {
@@ -996,12 +1002,25 @@ function formatUncachedInput(input, cached) {
   return formatTokenNumber(Math.max(0, Number(input || 0) - Number(cached || 0)));
 }
 
+function formatCompactUncachedInput(input, cached) {
+  return formatCompactNumber(Math.max(0, Number(input || 0) - Number(cached || 0)));
+}
+
 function cachedInputTitle(cached) {
   return `缓存：${formatTokenNumber(cached)}`;
 }
 
 function formatTokenNumber(value) {
   return String(Number(value || 0)).replace(/\B(?=(\d{4})+(?!\d))/g, ",");
+}
+
+function formatCompactNumber(value) {
+  const number = Number(value || 0);
+  const abs = Math.abs(number);
+  if (abs >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(2)}G`;
+  if (abs >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${(number / 1_000).toFixed(2)}K`;
+  return formatTokenNumber(number);
 }
 
 function generateApiKey() {
