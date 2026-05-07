@@ -343,6 +343,7 @@ function App() {
         {page === "appLogs" && (
           <AppLogsPage
             pageData={appLogs}
+            onMessage={setMessage}
             onQuery={async (query) => setAppLogs(await api.listAppLogs(query))}
           />
         )}
@@ -634,6 +635,14 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
       <ControlledField name="request_timeout_ms" label="请求超时 ms（0 为不限制）" value={draft.request_timeout_ms} type="number" onChange={setField} />
       <ControlledField name="usage_refresh_interval_secs" label="账号额度定时刷新间隔（秒，0 为关闭）" value={draft.usage_refresh_interval_secs} type="number" onChange={setField} />
       <div className="field">
+        <span>开机自启</span>
+        <div className="segmented segmented-three">
+          <button type="button" className={(draft.startup_launch || "disabled") === "disabled" ? "active" : ""} onClick={() => setField("startup_launch", "disabled")}>关闭</button>
+          <button type="button" className={draft.startup_launch === "auto" ? "active" : ""} onClick={() => setField("startup_launch", "auto")}>自动</button>
+          <button type="button" className={draft.startup_launch === "delayed" ? "active" : ""} onClick={() => setField("startup_launch", "delayed")}>自动(延迟)</button>
+        </div>
+      </div>
+      <div className="field">
         <span>自动启动网关</span>
         <div className="segmented">
           <button type="button" className={draft.auto_start_gateway === "true" ? "active" : ""} onClick={() => setField("auto_start_gateway", "true")}>开启</button>
@@ -688,7 +697,8 @@ function CodePreview({ title, value }) {
 }
 
 function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
-  const { query, setField, search, runWithPatch, setPageSize, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
+  const { query, pageSizeDraft, setField, search, runWithPatch, setPageSizeDraft, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
+  const pageTotals = sumCallRecords(pageData.items);
   async function copyValue(value) {
     const text = String(value || "").trim();
     if (!text) return;
@@ -733,17 +743,20 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
       )}
       <div className="table-wrap">
         <table>
-          <thead><tr><th>时间</th><th>账号</th><th>会话 ID</th><th>客户端路径</th><th>状态</th><th>耗时</th><th>输入(未命中)</th><th>输出</th><th>总计</th></tr></thead>
+          <thead><tr><th className="time-col">时间</th><th className="account-col">账号</th><th>会话 ID</th><th>客户端路径</th><th className="call-status-col">状态</th><th>耗时</th><th>输入(未命中)</th><th className="output-col">输出</th><th>总计</th></tr></thead>
           <tbody>
             {pageData.items.map((log) => (
               <tr key={log.id}>
-                <td>{formatTime(log.created_at)}</td>
-                <td>
+                <td className="time-col">{formatTime(log.created_at)}</td>
+                <td className="account-col">
                   <button
                     type="button"
                     className="text-copy"
                     title={log.account_name || log.account_id || ""}
-                    onClick={() => copyValue(log.account_name || log.account_id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      copyValue(log.account_name || log.account_id);
+                    }}
                     disabled={!log.account_name && !log.account_id}
                   >
                     {log.account_name || log.account_id || "-"}
@@ -753,30 +766,48 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
                   <button
                     type="button"
                     className="text-copy"
-                    onClick={() => copyValue(log.session_id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      copyValue(log.session_id);
+                    }}
                     disabled={!log.session_id}
                   >
                     {log.session_id || "-"}
                   </button>
                 </td>
                 <td className="url-cell" title={log.request_path || ""}>{log.request_path || "-"}</td>
-                <td>{log.status || "-"}</td>
+                <td className="call-status-col">{log.status || "-"}</td>
                 <td>{log.duration_ms ? `${log.duration_ms} ms` : "-"}</td>
                 <td title={cachedInputTitle(log.cached_input_tokens)}>{formatUncachedPair(log.input_tokens, log.cached_input_tokens)}</td>
-                <td>{formatTokenNumber(log.output_tokens)}</td>
+                <td className="output-col">{formatTokenNumber(log.output_tokens)}</td>
                 <td>{formatTokenNumber(log.total_tokens)}</td>
               </tr>
             ))}
           </tbody>
+          {pageData.items.length > 0 && (
+            <tfoot>
+              <tr className="total-row">
+                <td>合计</td>
+                <td colSpan={4}></td>
+                <td>{formatDurationTotal(pageTotals.duration_ms)}</td>
+                <td title={cachedInputTitle(pageTotals.cached_input_tokens)}>{formatUncachedPair(pageTotals.input_tokens, pageTotals.cached_input_tokens)}</td>
+                <td className="output-col">{formatTokenNumber(pageTotals.output_tokens)}</td>
+                <td>{formatTokenNumber(pageTotals.total_tokens)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
-      <Pager pageData={pageData} query={query} onPageSize={setPageSize} onPrev={prevPage} onNext={nextPage} />
+      <Pager pageData={pageData} pageSize={pageSizeDraft} onPageSize={setPageSizeDraft} onPrev={prevPage} onNext={nextPage} />
     </section>
   );
 }
 
-function AppLogsPage({ pageData, onQuery }) {
-  const { query, setField, search, setPageSize, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
+function AppLogsPage({ pageData, onMessage, onQuery }) {
+  const { query, pageSizeDraft, setField, search, setPageSizeDraft, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
+  async function copyRowAsJson(log) {
+    await copyJson(log, onMessage);
+  }
   return (
     <section className="panel">
       <div className="section-title">
@@ -788,24 +819,53 @@ function AppLogsPage({ pageData, onQuery }) {
       <LogFilters query={query} setField={setField} onSearch={search} />
       <div className="table-wrap">
         <table className="app-log-table">
-          <thead><tr><th>时间</th><th>级别</th><th>模块</th><th>动作</th><th>状态</th><th>消息</th></tr></thead>
+          <thead><tr><th className="time-col">时间</th><th className="level-col">级别</th><th className="scope-col">模块</th><th>动作</th><th className="status-col">状态</th><th>消息</th></tr></thead>
           <tbody>
             {pageData.items.map((log) => (
-              <tr key={log.id}>
-                <td>{formatTime(log.created_at)}</td>
-                <td>{log.level}</td>
-                <td>{log.scope || "-"}</td>
+              <tr key={log.id} className="copy-row" title="点击复制 JSON" onClick={() => copyRowAsJson(log)}>
+                <td className="time-col">{formatTime(log.created_at)}</td>
+                <td className="level-col">{log.level}</td>
+                <td className="scope-col">{log.scope || "-"}</td>
                 <td>{log.action || "-"}</td>
-                <td>{log.status || "-"}</td>
+                <td className="status-col">{log.status || "-"}</td>
                 <td className="message-cell" title={log.message || ""}>{log.message || ""}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <Pager pageData={pageData} query={query} onPageSize={setPageSize} onPrev={prevPage} onNext={nextPage} />
+      <Pager pageData={pageData} pageSize={pageSizeDraft} onPageSize={setPageSizeDraft} onPrev={prevPage} onNext={nextPage} />
     </section>
   );
+}
+
+async function copyJson(value, onMessage) {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(value, null, 2));
+    onMessage("复制成功");
+  } catch (error) {
+    onMessage(`复制失败：${error.message}`);
+  }
+}
+
+function sumCallRecords(items = []) {
+  return items.reduce((total, item) => ({
+    duration_ms: total.duration_ms + Number(item.duration_ms || 0),
+    input_tokens: total.input_tokens + Number(item.input_tokens || 0),
+    cached_input_tokens: total.cached_input_tokens + Number(item.cached_input_tokens || 0),
+    output_tokens: total.output_tokens + Number(item.output_tokens || 0),
+    total_tokens: total.total_tokens + Number(item.total_tokens || 0)
+  }), {
+    duration_ms: 0,
+    input_tokens: 0,
+    cached_input_tokens: 0,
+    output_tokens: 0,
+    total_tokens: 0
+  });
+}
+
+function formatDurationTotal(value) {
+  return value ? `${formatTokenNumber(value)} ms` : "-";
 }
 
 function LogFilters({ query, setField, onSearch, showTokenFilters = false }) {
@@ -833,7 +893,7 @@ function LogFilters({ query, setField, onSearch, showTokenFilters = false }) {
   );
 }
 
-function Pager({ pageData, query, onPageSize, onPrev, onNext }) {
+function Pager({ pageData, pageSize, onPageSize, onPrev, onNext }) {
   const totalPages = Math.max(1, Math.ceil((pageData.total || 0) / (pageData.pageSize || 10)));
   return (
     <div className="pager">
@@ -841,7 +901,7 @@ function Pager({ pageData, query, onPageSize, onPrev, onNext }) {
       <div className="actions-inline">
         <label className="page-size">
           <span>每页</span>
-          <input type="number" min="5" max="200" value={query.pageSize} onChange={(event) => onPageSize(event.target.value)} />
+          <input type="number" min="5" max="200" value={pageSize} onChange={(event) => onPageSize(event.target.value)} />
         </label>
         <button onClick={onPrev} disabled={(pageData.page || 1) <= 1}>上一页</button>
         <button onClick={onNext} disabled={(pageData.page || 1) >= totalPages}>下一页</button>
@@ -852,11 +912,17 @@ function Pager({ pageData, query, onPageSize, onPrev, onNext }) {
 
 function usePagedQuery(onQuery, pageData) {
   const [query, setQuery] = useState(() => todayQuery(pageData.pageSize || 10));
+  const [pageSizeDraft, setPageSizeDraft] = useState(pageData.pageSize || 10);
   function setField(key, value) {
     setQuery((prev) => ({ ...prev, [key]: value }));
   }
   async function run(page = 1) {
     const next = { ...query, page };
+    setQuery(next);
+    await onQuery(toLogQuery(next));
+  }
+  async function search() {
+    const next = { ...query, page: 1, pageSize: pageSizeDraft };
     setQuery(next);
     await onQuery(toLogQuery(next));
   }
@@ -867,14 +933,11 @@ function usePagedQuery(onQuery, pageData) {
   }
   return {
     query,
+    pageSizeDraft,
     setField,
-    search: () => run(1),
+    search,
     runWithPatch,
-    setPageSize: async (pageSize) => {
-      const next = { ...query, page: 1, pageSize };
-      setQuery(next);
-      await onQuery(toLogQuery(next));
-    },
+    setPageSizeDraft,
     nextPage: () => run((pageData.page || 1) + 1),
     prevPage: () => run(Math.max(1, (pageData.page || 1) - 1))
   };

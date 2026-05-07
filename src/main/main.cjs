@@ -23,6 +23,7 @@ let creatingTray = false;
 let usageRefreshTimer = null;
 const usageResetTimers = new Map();
 let shuttingDown = false;
+const STARTUP_DELAY_MS = 10_000;
 
 async function createWindow() {
   const bounds = readWindowBounds();
@@ -54,13 +55,15 @@ async function createWindow() {
 
 app.whenReady().then(async () => {
   store = createObservableStore(createStore());
+  applyStartupLaunchSettings(store.getSettings());
+  await waitForStartupDelay();
   syncDetectedCodexAuthMode();
   authService = createAuthService(store, () => gateway.start(), refreshUsage);
   gateway = createGateway(store, authService, { refreshAllUsage, refreshAccountToken: refreshGatewayAccountToken });
   registerIpc();
   scheduleUsageRefresh("startup");
-  checkUsageRefreshOnStartup();
-  checkStaleQuotasOnStartup();
+  const startedStartupRefreshAll = checkUsageRefreshOnStartup();
+  if (!startedStartupRefreshAll) checkStaleQuotasOnStartup();
   if (store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
       store.addAppLog({ scope: "gateway", action: "auto-start", status: "success", message: "应用启动时自动启动网关" });
@@ -69,8 +72,18 @@ app.whenReady().then(async () => {
       store.addAppLog({ level: "error", scope: "gateway", action: "auto-start", status: "failed", message: error.message });
     });
   }
-  await createWindow();
-  syncTrayForSettings();
+  if (isStartupHiddenLaunch()) {
+    store.addAppLog({
+      scope: "app",
+      action: "startup-hidden",
+      status: "success",
+      message: "开机自启时不显示主界面"
+    });
+    await createTray();
+  } else {
+    await createWindow();
+    syncTrayForSettings();
+  }
 });
 
 function createObservableStore(baseStore) {
@@ -119,6 +132,69 @@ function createObservableStore(baseStore) {
   };
 }
 
+async function waitForStartupDelay() {
+  if (!process.argv.includes("--startup-delayed")) return;
+  store.addAppLog({
+    scope: "app",
+    action: "startup-delay",
+    status: "start",
+    message: `开机延迟启动：等待 ${Math.round(STARTUP_DELAY_MS / 1000)} 秒`
+  });
+  await new Promise((resolve) => setTimeout(resolve, STARTUP_DELAY_MS));
+  store.addAppLog({
+    scope: "app",
+    action: "startup-delay",
+    status: "success",
+    message: "开机延迟启动等待完成"
+  });
+}
+
+function isStartupHiddenLaunch() {
+  return process.argv.includes("--startup-hidden") || process.argv.includes("--startup-delayed");
+}
+
+function applyStartupLaunchSettings(settings) {
+  const mode = normalizeStartupLaunchMode(settings.startup_launch);
+  const openAtLogin = mode !== "disabled";
+  const args = mode === "delayed"
+    ? ["--startup-hidden", "--startup-delayed"]
+    : mode === "auto"
+      ? ["--startup-hidden"]
+      : [];
+  try {
+    app.setLoginItemSettings({
+      openAtLogin,
+      openAsHidden: openAtLogin,
+      args
+    });
+    store?.addAppLog({
+      scope: "app",
+      action: "startup-launch",
+      status: "success",
+      message: `已同步开机自启设置：${startupLaunchLabel(mode)}`
+    });
+  } catch (error) {
+    store?.addAppLog({
+      level: "error",
+      scope: "app",
+      action: "startup-launch",
+      status: "failed",
+      message: `同步开机自启设置失败：${error.message}`
+    });
+  }
+}
+
+function normalizeStartupLaunchMode(value) {
+  if (value === "auto" || value === "delayed") return value;
+  return "disabled";
+}
+
+function startupLaunchLabel(mode) {
+  if (mode === "auto") return "自动";
+  if (mode === "delayed") return "自动(延迟)";
+  return "关闭";
+}
+
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
@@ -163,6 +239,7 @@ function registerIpc() {
   }));
   ipcMain.handle("settings:save", (_event, patch) => {
     const settings = store.saveSettings(patch);
+    applyStartupLaunchSettings(settings);
     scheduleUsageRefresh("settings-save");
     syncTrayForSettings();
     return settings;
@@ -603,7 +680,7 @@ function checkUsageRefreshOnStartup() {
       status: "disabled",
       message: `启动时跳过账号额度补刷检查：间隔为 ${settings.usage_refresh_interval_secs || 0}`
     });
-    return;
+    return false;
   }
   const effectiveIntervalSecs = Math.max(60, intervalSecs);
   const now = Math.floor(Date.now() / 1000);
@@ -615,7 +692,7 @@ function checkUsageRefreshOnStartup() {
       status: "fresh",
       message: `启动时账号额度无需补刷：上次刷新全部额度时间 ${formatTime(lastRefreshAt)}`
     });
-    return;
+    return false;
   }
   const elapsed = lastRefreshAt > 0 ? `${now - lastRefreshAt} 秒` : "无记录";
   store.addAppLog({
@@ -633,6 +710,7 @@ function checkUsageRefreshOnStartup() {
       message: `启动时自动刷新全部额度失败：${compactError(error.message)}`
     });
   });
+  return true;
 }
 
 function checkStaleQuotasOnStartup() {

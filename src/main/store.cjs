@@ -125,6 +125,7 @@ function migrate(db) {
     usage_refresh_interval_secs: "900",
     last_usage_refresh_all_at: "0",
     auto_start_gateway: "false",
+    startup_launch: "disabled",
     close_behavior: "exit",
     codex_auth_mode: "gateway",
     codex_selected_account_id: ""

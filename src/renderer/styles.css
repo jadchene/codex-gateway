@@ -429,6 +429,10 @@ textarea {
   background: #f8fafc;
 }
 
+.segmented-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .segmented button {
   min-width: 112px;
   border: 0;
@@ -887,8 +891,12 @@ td {
   line-height: 1.35;
 }
 
+.copy-row:hover td {
+  background: #f8fafc;
+}
+
 .url-cell {
-  max-width: 260px;
+  max-width: 150px;
   overflow-wrap: anywhere;
   color: #344054;
 }
@@ -899,10 +907,51 @@ td {
   color: #344054;
 }
 
+.account-col {
+  width: 136px;
+  max-width: 136px;
+}
+
+.call-status-col {
+  width: 48px;
+  max-width: 48px;
+  white-space: nowrap;
+}
+
+.output-col {
+  width: 72px;
+  max-width: 72px;
+  white-space: nowrap;
+}
+
+.time-col {
+  width: 118px;
+  max-width: 118px;
+  white-space: nowrap;
+}
+
+.app-log-table .level-col {
+  width: 48px;
+  max-width: 48px;
+  white-space: nowrap;
+}
+
+.app-log-table .scope-col {
+  width: 58px;
+  max-width: 58px;
+  white-space: nowrap;
+}
+
+.app-log-table .status-col {
+  width: 62px;
+  max-width: 62px;
+  white-space: nowrap;
+}
+
 .text-copy {
   display: block;
   width: calc(100% - 4px);
-  max-width: 176px;
+  max-width: 100%;
   border: 0;
   background: transparent;
   padding: 0 0 0 4px;
@@ -930,6 +979,14 @@ td {
 th {
   color: #475467;
   background: #f8fafc;
+}
+
+tfoot td,
+.total-row td {
+  font-weight: 600;
+  color: #182230;
+  background: #f8fafc;
+  border-top: 1px solid #cbd5e1;
 }
 
 .empty {
