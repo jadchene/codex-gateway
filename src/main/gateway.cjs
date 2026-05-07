@@ -60,9 +60,10 @@ async function handleRequest(req, res, store, authService, hooks) {
     return sendJson(res, 401, { error: { message: "Incorrect API key provided." } });
   }
 
+  let request = null;
   try {
     const incomingBody = await readBody(req);
-    const request = buildGatewayRequest(settings.upstream_base_url, req.url, incomingBody, req.headers);
+    request = buildGatewayRequest(settings.upstream_base_url, req.url, incomingBody, req.headers);
     const firstAccount = pickGatewayAccount(store.listAccounts());
     if (!firstAccount) {
       return sendJson(res, 503, { error: { message: "The server is currently unavailable. Please try again later." } });
@@ -124,12 +125,14 @@ async function handleRequest(req, res, store, authService, hooks) {
     }
   } catch (error) {
     const message = error?.name === "AbortError" ? "Upstream request timed out." : String(error?.message || error);
+    const requestPath = request?.originalPath || `${pathname}${parsedUrl.search}`;
+    const upstreamPath = request?.upstreamUrl ? pathFromUrl(request.upstreamUrl) : pathFromUrl(buildUpstreamUrl(settings.upstream_base_url, req.url));
     store.addAppLog({
       level: "error",
       scope: "gateway",
       action: "request",
       status: "failed",
-      message
+      message: `${req.method || "-"} ${requestPath} -> ${upstreamPath}: ${gatewayErrorMessage(error, message)}`
     });
     const clientMessage = error?.name === "AbortError" ? "Request timed out." : "The server encountered a temporary error and could not complete your request.";
     sendJson(res, 502, { error: { message: clientMessage } });
@@ -412,6 +415,19 @@ function pathFromUrl(value) {
   } catch {
     return String(value || "");
   }
+}
+
+function gatewayErrorMessage(error, fallback) {
+  const message = fallback || String(error?.message || error || "");
+  const cause = error?.cause;
+  const causeParts = [
+    cause?.code,
+    cause?.errno,
+    cause?.syscall,
+    cause?.address,
+    cause?.port
+  ].filter(Boolean);
+  return causeParts.length > 0 ? `${message} (${causeParts.join(" ")})` : message;
 }
 
 function buildUpstreamHeaders(headers, account, hasBody = false, path = "") {
