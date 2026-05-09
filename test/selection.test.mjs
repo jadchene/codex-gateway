@@ -7,6 +7,7 @@ const { pickGatewayAccount, quotaWindowExhausted, resetSelectionState, usageScor
 const { buildAuthorizeUrl } = require("../src/main/auth.cjs");
 const { gatewayProviderBlock, insertProviderBlockIntoConfig, replaceGatewayProviderBlock } = require("../src/main/codex-cli-auth.cjs");
 const {
+  buildCodexQuotaHeaders,
   buildGatewayRequest,
   buildUpstreamHeaders,
   buildUpstreamUrl,
@@ -194,6 +195,66 @@ test("buildGatewayRequest keeps compact endpoint path", () => {
   );
   assert.equal(request.path, "/v1/responses/compact");
   assert.equal(request.upstreamUrl, "https://chatgpt.com/backend-api/codex/responses/compact");
+});
+
+test("buildCodexQuotaHeaders rewrites quota headers from account pool", () => {
+  const headers = buildCodexQuotaHeaders([
+    {
+      enabled: true,
+      status: "active",
+      access_token: "a",
+      quota_5h_used_percent: 20,
+      quota_5h_reset_at: 1_000,
+      quota_7d_used_percent: 30,
+      quota_7d_reset_at: 5_000
+    },
+    {
+      enabled: true,
+      status: "active",
+      access_token: "b",
+      quota_5h_used_percent: 40,
+      quota_5h_reset_at: 900,
+      quota_7d_used_percent: 50,
+      quota_7d_reset_at: 4_000
+    },
+    {
+      enabled: false,
+      status: "active",
+      access_token: "c",
+      quota_5h_used_percent: 100,
+      quota_5h_reset_at: 100,
+      quota_7d_used_percent: 100,
+      quota_7d_reset_at: 100
+    }
+  ], 500);
+  assert.equal(headers["x-codex-primary-used-percent"], "0");
+  assert.equal(headers["x-codex-primary-window-minutes"], "300");
+  assert.equal(headers["x-codex-primary-reset-after-seconds"], "400");
+  assert.equal(headers["x-codex-secondary-used-percent"], "0");
+  assert.equal(headers["x-codex-secondary-window-minutes"], "10080");
+  assert.equal(headers["x-codex-secondary-reset-after-seconds"], "3500");
+  assert.equal(headers["x-codex-plan-type"], "unknown");
+  assert.equal(headers["x-codex-active-limit"], "primary");
+  assert.equal(headers["x-codex-credits-balance"], "0");
+  assert.equal(headers["x-codex-credits-has-credits"], "false");
+  assert.equal(headers["x-codex-credits-unlimited"], "false");
+});
+
+test("buildCodexQuotaHeaders caps stacked remaining quota before subtraction", () => {
+  const headers = buildCodexQuotaHeaders([
+    { enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 80, quota_5h_reset_at: 100 },
+    { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 50, quota_5h_reset_at: 200 }
+  ], 500);
+  assert.equal(headers["x-codex-primary-used-percent"], "30");
+  assert.equal(headers["x-codex-primary-reset-after-seconds"], "0");
+});
+
+test("buildCodexQuotaHeaders subtracts stacked remaining quota from 100", () => {
+  const headers = buildCodexQuotaHeaders([
+    { enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 90 },
+    { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 80 }
+  ], 500);
+  assert.equal(headers["x-codex-primary-used-percent"], "70");
 });
 
 test("matchGatewayRoute validates both path and method", () => {

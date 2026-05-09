@@ -76,7 +76,7 @@ async function handleRequest(req, res, store, authService, hooks) {
 
     if (response.status >= 200 && response.status < 300) {
       res.statusCode = response.status;
-      copyHeadersToResponse(response.headers, res);
+      copyHeadersToResponse(response.headers, res, settings, store);
       
       const usageParser = createSseUsageParser();
       if (response.body) {
@@ -110,7 +110,7 @@ async function handleRequest(req, res, store, authService, hooks) {
       });
     } else {
       res.statusCode = response.status;
-      copyHeadersToResponse(response.headers, res);
+      copyHeadersToResponse(response.headers, res, settings, store);
       res.end(body);
 
       store.addTokenLog({
@@ -280,12 +280,95 @@ const BLOCKED_RESPONSE_HEADERS = new Set([
   "x-codex-credits-unlimited"
 ]);
 
-function copyHeadersToResponse(headers, res) {
+function copyHeadersToResponse(headers, res, settings = {}, store = null) {
   headers.forEach((value, key) => {
     if (!BLOCKED_RESPONSE_HEADERS.has(key.toLowerCase())) {
       res.setHeader(key, value);
     }
   });
+  if (settings.codex_quota_headers_mode === "rewrite") {
+    const accounts = store?.listAccounts ? store.listAccounts() : [];
+    const detail = buildCodexQuotaHeaderDetail(accounts);
+    setCodexQuotaHeaders(res, detail.headers);
+  }
+}
+
+function setCodexQuotaHeaders(res, headers) {
+  for (const [key, value] of Object.entries(headers)) {
+    res.setHeader(key, value);
+  }
+}
+
+function buildCodexQuotaHeaders(accounts, nowSeconds = Math.floor(Date.now() / 1000)) {
+  return buildCodexQuotaHeaderDetail(accounts, nowSeconds).headers;
+}
+
+function buildCodexQuotaHeaderDetail(accounts, nowSeconds = Math.floor(Date.now() / 1000)) {
+  const pool = accounts.filter((account) => account
+    && account.enabled
+    && account.status !== "disabled"
+    && account.access_token);
+  const primary = resetAfterSeconds(pool, "quota_5h_reset_at", nowSeconds);
+  const secondary = resetAfterSeconds(pool, "quota_7d_reset_at", nowSeconds);
+  const headers = {
+    "x-codex-primary-used-percent": formatHeaderNumber(remainingPercent(pool, "quota_5h_used_percent")),
+    "x-codex-primary-window-minutes": "300",
+    "x-codex-primary-reset-after-seconds": String(primary.value),
+    "x-codex-secondary-used-percent": formatHeaderNumber(remainingPercent(pool, "quota_7d_used_percent")),
+    "x-codex-secondary-window-minutes": "10080",
+    "x-codex-secondary-reset-after-seconds": String(secondary.value),
+    "x-codex-plan-type": "unknown",
+    "x-codex-active-limit": "primary",
+    "x-codex-credits-balance": "0",
+    "x-codex-credits-has-credits": "false",
+    "x-codex-credits-unlimited": "false"
+  };
+  return {
+    headers,
+    nowSeconds,
+    accountCount: pool.length,
+    primary,
+    secondary
+  };
+}
+
+function remainingPercent(accounts, field) {
+  const remaining = accounts
+    .map((account) => Number(account[field]))
+    .filter((value) => Number.isFinite(value))
+    .reduce((sum, value) => sum + Math.max(0, 100 - clampPercent(value)), 0);
+  return 100 - Math.min(100, remaining);
+}
+
+function resetAfterSeconds(accounts, field, nowSeconds) {
+  let nearest = null;
+  const candidates = [];
+  for (const account of accounts) {
+    const resetAt = Number(account[field]);
+    if (!Number.isFinite(resetAt) || resetAt <= 0) continue;
+    const item = {
+      id: account.id,
+      email: account.email || account.name || account.id,
+      reset_at: resetAt,
+      reset_after_seconds: Math.max(0, Math.trunc(resetAt - nowSeconds))
+    };
+    candidates.push(item);
+    if (nearest === null || resetAt < nearest.reset_at) nearest = item;
+  }
+  return {
+    value: nearest === null ? 0 : nearest.reset_after_seconds,
+    selected: nearest,
+    candidates
+  };
+}
+
+function clampPercent(value) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatHeaderNumber(value) {
+  const rounded = Math.round(clampPercent(value) * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function writeResponseChunk(res, value) {
@@ -544,6 +627,7 @@ module.exports = {
   buildUpstreamHeaders,
   buildGatewayRequest,
   matchGatewayRoute,
+  buildCodexQuotaHeaders,
   extractTokenUsage,
   isQuotaExhaustedResponse,
   isAuthExpiredResponse

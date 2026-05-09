@@ -635,6 +635,13 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
       <ControlledField name="request_timeout_ms" label="请求超时 ms（0 为不限制）" value={draft.request_timeout_ms} type="number" onChange={setField} />
       <ControlledField name="usage_refresh_interval_secs" label="账号额度定时刷新间隔（秒，0 为关闭）" value={draft.usage_refresh_interval_secs} type="number" onChange={setField} />
       <div className="field">
+        <span>Codex 额度响应头</span>
+        <div className="segmented">
+          <button type="button" className={(draft.codex_quota_headers_mode || "block") === "block" ? "active" : ""} onClick={() => setField("codex_quota_headers_mode", "block")}>屏蔽</button>
+          <button type="button" className={draft.codex_quota_headers_mode === "rewrite" ? "active" : ""} onClick={() => setField("codex_quota_headers_mode", "rewrite")}>重写</button>
+        </div>
+      </div>
+      <div className="field">
         <span>开机自启</span>
         <div className="segmented segmented-three">
           <button type="button" className={(draft.startup_launch || "disabled") === "disabled" ? "active" : ""} onClick={() => setField("startup_launch", "disabled")}>关闭</button>

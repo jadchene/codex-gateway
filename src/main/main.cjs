@@ -575,71 +575,26 @@ async function shutdownRuntime(reason, error) {
 function readWindowBounds() {
   if (!store) return {};
   const settings = store.getSettings();
-  const width = Number(settings.window_width);
-  const height = Number(settings.window_height);
-  const x = Number(settings.window_x);
-  const y = Number(settings.window_y);
-  const display = Number.isFinite(x) && Number.isFinite(y)
-    ? screen.getDisplayNearestPoint({ x, y })
-    : screen.getPrimaryDisplay();
-  const workArea = display?.workArea || {};
-  const restoredWidth = clampWindowSize(width, 980, workArea.width);
-  const restoredHeight = clampWindowSize(height, 640, workArea.height);
-  const bounds = {
-    width: restoredWidth,
-    height: restoredHeight,
-    x: Number.isFinite(x) ? x : undefined,
-    y: Number.isFinite(y) ? y : undefined
+  return {
+    x: numberOrUndefined(settings.window_x),
+    y: numberOrUndefined(settings.window_y),
+    width: numberOrUndefined(settings.window_width),
+    height: numberOrUndefined(settings.window_height)
   };
-  return clampWindowBoundsToWorkArea(bounds, workArea);
 }
 
-function clampWindowSize(value, min, max) {
-  if (!Number.isFinite(value) || value < min) return undefined;
-  const upper = Number.isFinite(max) && max > min ? Math.max(min, max - 24) : undefined;
-  return upper ? Math.min(value, upper) : value;
-}
-
-function clampWindowBoundsToWorkArea(bounds, workArea) {
-  if (!Number.isFinite(workArea.x) || !Number.isFinite(workArea.y)) return bounds;
-  const next = { ...bounds };
-  if (Number.isFinite(next.x) && Number.isFinite(next.width) && Number.isFinite(workArea.width)) {
-    const maxX = workArea.x + Math.max(0, workArea.width - Math.min(next.width, workArea.width));
-    next.x = Math.max(workArea.x, Math.min(next.x, maxX));
-  }
-  if (Number.isFinite(next.y) && Number.isFinite(next.height) && Number.isFinite(workArea.height)) {
-    const maxY = workArea.y + Math.max(0, workArea.height - Math.min(next.height, workArea.height));
-    next.y = Math.max(workArea.y, Math.min(next.y, maxY));
-  }
-  return next;
+function numberOrUndefined(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
 }
 
 function bindWindowBoundsPersistence(win) {
-  let timer = null;
-  const windowSettingsPatch = () => {
-    const bounds = win.getBounds();
-    const display = screen.getDisplayMatching(bounds);
-    return {
-      window_x: String(bounds.x),
-      window_y: String(bounds.y),
-      window_width: String(bounds.width),
-      window_height: String(bounds.height),
-      window_scale_factor: String(display?.scaleFactor || 1)
-    };
-  };
-  const save = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      if (!store || win.isDestroyed()) return;
-      store.saveSettings(windowSettingsPatch());
-    }, 350);
-  };
+  const save = () => saveMainWindowBounds(win);
   win.on("resize", save);
   win.on("move", save);
   win.on("close", (event) => {
-    if (timer) clearTimeout(timer);
     if (!store || win.isDestroyed()) return;
-    store.saveSettings(windowSettingsPatch());
+    saveMainWindowBounds(win);
     if (!shuttingDown && store.getSettings().close_behavior === "tray") {
       event.preventDefault();
       void createTray();
@@ -651,6 +606,17 @@ function bindWindowBoundsPersistence(win) {
         message: "关闭窗口时最小化到托盘"
       });
     }
+  });
+}
+
+function saveMainWindowBounds(win = mainWindow) {
+  if (!store || !win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  store.saveSettings({
+    window_x: String(bounds.x),
+    window_y: String(bounds.y),
+    window_width: String(bounds.width),
+    window_height: String(bounds.height)
   });
 }
 

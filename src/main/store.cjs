@@ -127,6 +127,7 @@ function migrate(db) {
     auto_start_gateway: "false",
     startup_launch: "disabled",
     close_behavior: "exit",
+    codex_quota_headers_mode: "block",
     codex_auth_mode: "gateway",
     codex_selected_account_id: ""
   };
