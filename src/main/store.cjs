@@ -282,7 +282,6 @@ function updateLoginSession(db, id, status, error) {
 }
 
 function addTokenLog(db, entry) {
-  if (!hasTokenUsage(entry)) return;
   db.prepare(`
     INSERT INTO request_logs (
       account_id, method, request_path, upstream_path, session_id, version, status, duration_ms,
@@ -375,8 +374,7 @@ function tokenSummary(db, query) {
 function tokenLogFilter(range) {
   const clauses = [
     "request_logs.created_at >= ?",
-    "request_logs.created_at < ?",
-    "(input_tokens > 0 OR cached_input_tokens > 0 OR output_tokens > 0 OR total_tokens > 0)"
+    "request_logs.created_at < ?"
   ];
   const params = [range.startAt, range.endAt];
   if (range.accountId) {
@@ -465,13 +463,6 @@ function clampInt(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(number)));
-}
-
-function hasTokenUsage(entry) {
-  return toInt(entry.input_tokens) > 0
-    || toInt(entry.cached_input_tokens) > 0
-    || toInt(entry.output_tokens) > 0
-    || toInt(entry.total_tokens) > 0;
 }
 
 function toInt(value) {

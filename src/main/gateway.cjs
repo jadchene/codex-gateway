@@ -61,6 +61,7 @@ async function handleRequest(req, res, store, authService, hooks) {
   }
 
   let request = null;
+  let accountForLog = null;
   try {
     const incomingBody = await readBody(req);
     request = buildGatewayRequest(settings.upstream_base_url, req.url, incomingBody, req.headers);
@@ -68,8 +69,10 @@ async function handleRequest(req, res, store, authService, hooks) {
     if (!firstAccount) {
       return sendJson(res, 503, { error: { message: "The server is currently unavailable. Please try again later." } });
     }
+    accountForLog = firstAccount;
 
     const { account, response, body, tokenUsage: errorUsage } = await callWithFailover(req, request, firstAccount, settings, store, hooks);
+    accountForLog = account;
 
     if (response.status >= 200 && response.status < 300) {
       res.statusCode = response.status;
@@ -127,6 +130,20 @@ async function handleRequest(req, res, store, authService, hooks) {
     const message = error?.name === "AbortError" ? "Upstream request timed out." : String(error?.message || error);
     const requestPath = request?.originalPath || `${pathname}${parsedUrl.search}`;
     const upstreamPath = request?.upstreamUrl ? pathFromUrl(request.upstreamUrl) : pathFromUrl(buildUpstreamUrl(settings.upstream_base_url, req.url));
+    if (request && accountForLog) {
+      store.addTokenLog({
+        account_id: accountForLog.id,
+        method: req.method,
+        request_path: request.originalPath,
+        upstream_path: pathFromUrl(request.upstreamUrl),
+        session_id: headerValue(req.headers.session_id),
+        version: headerValue(req.headers.version),
+        status: 502,
+        duration_ms: Date.now() - started,
+        ...emptyUsage(),
+        message: gatewayErrorMessage(error, message)
+      });
+    }
     store.addAppLog({
       level: "error",
       scope: "gateway",
