@@ -262,9 +262,27 @@ async function callUpstream(req, request, account, settings) {
   }
 }
 
+const BLOCKED_RESPONSE_HEADERS = new Set([
+  "content-encoding",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+  "x-codex-primary-used-percent",
+  "x-codex-primary-window-minutes",
+  "x-codex-primary-reset-after-seconds",
+  "x-codex-secondary-used-percent",
+  "x-codex-secondary-window-minutes",
+  "x-codex-secondary-reset-after-seconds",
+  "x-codex-plan-type",
+  "x-codex-active-limit",
+  "x-codex-credits-balance",
+  "x-codex-credits-has-credits",
+  "x-codex-credits-unlimited"
+]);
+
 function copyHeadersToResponse(headers, res) {
   headers.forEach((value, key) => {
-    if (!["content-encoding", "content-length", "transfer-encoding", "connection"].includes(key.toLowerCase())) {
+    if (!BLOCKED_RESPONSE_HEADERS.has(key.toLowerCase())) {
       res.setHeader(key, value);
     }
   });

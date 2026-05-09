@@ -579,29 +579,39 @@ function readWindowBounds() {
   const height = Number(settings.window_height);
   const x = Number(settings.window_x);
   const y = Number(settings.window_y);
-  const savedScaleFactor = Number(settings.window_scale_factor);
   const display = Number.isFinite(x) && Number.isFinite(y)
     ? screen.getDisplayNearestPoint({ x, y })
     : screen.getPrimaryDisplay();
-  const scaleFactor = Number(display?.scaleFactor || 1);
-  const scaleRatio = Number.isFinite(savedScaleFactor) && savedScaleFactor > 0 && scaleFactor > 0
-    ? savedScaleFactor / scaleFactor
-    : 1;
   const workArea = display?.workArea || {};
-  const restoredWidth = Number.isFinite(width) ? Math.round(width * scaleRatio) : undefined;
-  const restoredHeight = Number.isFinite(height) ? Math.round(height * scaleRatio) : undefined;
-  return {
-    width: clampWindowSize(restoredWidth, 980, workArea.width),
-    height: clampWindowSize(restoredHeight, 640, workArea.height),
+  const restoredWidth = clampWindowSize(width, 980, workArea.width);
+  const restoredHeight = clampWindowSize(height, 640, workArea.height);
+  const bounds = {
+    width: restoredWidth,
+    height: restoredHeight,
     x: Number.isFinite(x) ? x : undefined,
     y: Number.isFinite(y) ? y : undefined
   };
+  return clampWindowBoundsToWorkArea(bounds, workArea);
 }
 
 function clampWindowSize(value, min, max) {
   if (!Number.isFinite(value) || value < min) return undefined;
   const upper = Number.isFinite(max) && max > min ? Math.max(min, max - 24) : undefined;
   return upper ? Math.min(value, upper) : value;
+}
+
+function clampWindowBoundsToWorkArea(bounds, workArea) {
+  if (!Number.isFinite(workArea.x) || !Number.isFinite(workArea.y)) return bounds;
+  const next = { ...bounds };
+  if (Number.isFinite(next.x) && Number.isFinite(next.width) && Number.isFinite(workArea.width)) {
+    const maxX = workArea.x + Math.max(0, workArea.width - Math.min(next.width, workArea.width));
+    next.x = Math.max(workArea.x, Math.min(next.x, maxX));
+  }
+  if (Number.isFinite(next.y) && Number.isFinite(next.height) && Number.isFinite(workArea.height)) {
+    const maxY = workArea.y + Math.max(0, workArea.height - Math.min(next.height, workArea.height));
+    next.y = Math.max(workArea.y, Math.min(next.y, maxY));
+  }
+  return next;
 }
 
 function bindWindowBoundsPersistence(win) {
