@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, shell } = require("electron");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -579,27 +579,49 @@ function readWindowBounds() {
   const height = Number(settings.window_height);
   const x = Number(settings.window_x);
   const y = Number(settings.window_y);
+  const savedScaleFactor = Number(settings.window_scale_factor);
+  const display = Number.isFinite(x) && Number.isFinite(y)
+    ? screen.getDisplayNearestPoint({ x, y })
+    : screen.getPrimaryDisplay();
+  const scaleFactor = Number(display?.scaleFactor || 1);
+  const scaleRatio = Number.isFinite(savedScaleFactor) && savedScaleFactor > 0 && scaleFactor > 0
+    ? savedScaleFactor / scaleFactor
+    : 1;
+  const workArea = display?.workArea || {};
+  const restoredWidth = Number.isFinite(width) ? Math.round(width * scaleRatio) : undefined;
+  const restoredHeight = Number.isFinite(height) ? Math.round(height * scaleRatio) : undefined;
   return {
-    width: Number.isFinite(width) && width >= 980 ? width : undefined,
-    height: Number.isFinite(height) && height >= 640 ? height : undefined,
+    width: clampWindowSize(restoredWidth, 980, workArea.width),
+    height: clampWindowSize(restoredHeight, 640, workArea.height),
     x: Number.isFinite(x) ? x : undefined,
     y: Number.isFinite(y) ? y : undefined
   };
 }
 
+function clampWindowSize(value, min, max) {
+  if (!Number.isFinite(value) || value < min) return undefined;
+  const upper = Number.isFinite(max) && max > min ? Math.max(min, max - 24) : undefined;
+  return upper ? Math.min(value, upper) : value;
+}
+
 function bindWindowBoundsPersistence(win) {
   let timer = null;
+  const windowSettingsPatch = () => {
+    const bounds = win.getBounds();
+    const display = screen.getDisplayMatching(bounds);
+    return {
+      window_x: String(bounds.x),
+      window_y: String(bounds.y),
+      window_width: String(bounds.width),
+      window_height: String(bounds.height),
+      window_scale_factor: String(display?.scaleFactor || 1)
+    };
+  };
   const save = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       if (!store || win.isDestroyed()) return;
-      const bounds = win.getBounds();
-      store.saveSettings({
-        window_x: String(bounds.x),
-        window_y: String(bounds.y),
-        window_width: String(bounds.width),
-        window_height: String(bounds.height)
-      });
+      store.saveSettings(windowSettingsPatch());
     }, 350);
   };
   win.on("resize", save);
@@ -607,13 +629,7 @@ function bindWindowBoundsPersistence(win) {
   win.on("close", (event) => {
     if (timer) clearTimeout(timer);
     if (!store || win.isDestroyed()) return;
-    const bounds = win.getBounds();
-    store.saveSettings({
-      window_x: String(bounds.x),
-      window_y: String(bounds.y),
-      window_width: String(bounds.width),
-      window_height: String(bounds.height)
-    });
+    store.saveSettings(windowSettingsPatch());
     if (!shuttingDown && store.getSettings().close_behavior === "tray") {
       event.preventDefault();
       void createTray();

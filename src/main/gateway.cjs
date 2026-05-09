@@ -151,8 +151,12 @@ async function handleRequest(req, res, store, authService, hooks) {
       status: "failed",
       message: `${req.method || "-"} ${requestPath} -> ${upstreamPath}: ${gatewayErrorMessage(error, message)}`
     });
-    const clientMessage = error?.name === "AbortError" ? "Request timed out." : "The server encountered a temporary error and could not complete your request.";
-    sendJson(res, 502, { error: { message: clientMessage } });
+    if (!res.headersSent) {
+      const clientMessage = error?.name === "AbortError" ? "Request timed out." : "The server encountered a temporary error and could not complete your request.";
+      sendJson(res, 502, { error: { message: clientMessage } });
+    } else if (!res.writableEnded) {
+      res.end();
+    }
   }
 }
 
@@ -493,14 +497,16 @@ function readBody(req) {
 }
 
 function sendJson(res, status, body) {
+  if (res.writableEnded) return;
   res.statusCode = status;
-  res.setHeader("content-type", "application/json; charset=utf-8");
+  if (!res.headersSent) res.setHeader("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
 }
 
 function sendHtml(res, status, title, message) {
+  if (res.writableEnded) return;
   res.statusCode = status;
-  res.setHeader("content-type", "text/html; charset=utf-8");
+  if (!res.headersSent) res.setHeader("content-type", "text/html; charset=utf-8");
   res.end(`<!doctype html><meta charset="utf-8"><title>${escapeHtml(title)}</title><body style="font-family:system-ui;padding:40px"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></body>`);
 }
 

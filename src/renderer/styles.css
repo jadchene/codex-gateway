@@ -887,7 +887,7 @@ table {
 
 .app-log-table th:nth-child(5),
 .app-log-table td:nth-child(5) {
-  width: 100px;
+  width: 120px;
 }
 
 th,
@@ -952,8 +952,8 @@ td {
 }
 
 .app-log-table .status-col {
-  width: 93px;
-  max-width: 93px;
+  width: 120px;
+  max-width: 120px;
   white-space: nowrap;
 }
 
