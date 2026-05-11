@@ -130,7 +130,10 @@ function migrate(db) {
     codex_quota_headers_mode: "block",
     codex_auth_mode: "gateway",
     codex_selected_account_id: "",
-    gateway_current_account_id: ""
+    gateway_current_account_id: "",
+    billing_uncached_input_factor: "125",
+    billing_cached_input_factor: "12.5",
+    billing_output_factor: "750"
   };
   const insert = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
   for (const [key, value] of Object.entries(defaults)) insert.run(key, value);

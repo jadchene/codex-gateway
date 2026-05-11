@@ -4,7 +4,7 @@
 
 **免责声明**：本项目仅用于学习和本地开发测试。使用者必须遵守相关平台的服务条款。本项目只面向个人本机使用，不提供、不分发任何账号、API Key 或代理服务，也不应被用于多用户共享、商业转售、规避限制或其它违反服务条款的用途。请自行承担使用风险。
 
-Codex Gateway 是一个本地桌面应用，用于管理个人的 Codex/ChatGPT 登录状态、查看额度信息，并为 Codex 提供一个本机 `/v1/responses` 网关入口。应用基于 Electron、React 和 Vite 构建，数据保存在本机 SQLite。
+Codex Gateway 是一个本地桌面应用，用于管理个人的 Codex/ChatGPT 登录状态、查看额度信息，并为 Codex 提供一个本机网关入口。应用基于 Electron、React 和 Vite 构建，数据保存在本机 SQLite。
 
 ### 功能
 

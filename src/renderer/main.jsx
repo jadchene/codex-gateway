@@ -279,7 +279,7 @@ function App() {
       <section className="content">
         {message && <div className="toast" role="status">{message}</div>}
 
-        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} tokenSummary={dashboardSummary} quotaSummary={quotaSummary} />}
+        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} tokenSummary={dashboardSummary} quotaSummary={quotaSummary} settings={settings} />}
         {page === "accounts" && (
           <AccountsPage
             accounts={accounts}
@@ -336,6 +336,7 @@ function App() {
             pageData={tokenLogs}
             summary={tokenSummary}
             accounts={accounts}
+            settings={settings}
             onMessage={setMessage}
             onQuery={async (query) => {
               setTokenLogs(await api.listTokenLogs(query));
@@ -355,9 +356,10 @@ function App() {
   );
 }
 
-function Dashboard({ accounts, gateway, tokenSummary, quotaSummary }) {
+function Dashboard({ accounts, gateway, tokenSummary, quotaSummary, settings }) {
   const usable = accounts.filter(isUsableAccount).length;
   const total = tokenSummary?.total || {};
+  const billingFactors = billingFactorsFromSettings(settings);
   return (
     <section className="panel">
       <div className="section-title">
@@ -378,8 +380,9 @@ function Dashboard({ accounts, gateway, tokenSummary, quotaSummary }) {
       <div className="dashboard-grid">
         <Metric title="调用次数" value={total.calls || 0} />
         <Metric title="总 Token" value={total.total_tokens || 0} />
-        <Metric title="输入(未命中) Token" value={formatUncachedPair(total.input_tokens, total.cached_input_tokens)} hint={cachedInputTitle(total.cached_input_tokens)} />
+        <Metric title="输入(未命中) Token" value={formatUncachedPair(total.input_tokens, total.cached_input_tokens)} hint={cachedInputTitle(total.input_tokens, total.cached_input_tokens)} />
         <Metric title="输出 Token" value={total.output_tokens || 0} />
+        <Metric title="计费系数" value={formatBillingCoefficient(total, billingFactors)} />
       </div>
     </section>
   );
@@ -641,8 +644,13 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
       <ControlledField name="upstream_base_url" label="上游地址" value={draft.upstream_base_url} onChange={setField} />
       <ControlledField name="request_timeout_ms" label="请求超时 ms（0 为不限制）" value={draft.request_timeout_ms} type="number" onChange={setField} />
       <ControlledField name="usage_refresh_interval_secs" label="账号额度定时刷新间隔（秒，0 为关闭）" value={draft.usage_refresh_interval_secs} type="number" onChange={setField} />
+      <div className="split split-three">
+        <ControlledField name="billing_uncached_input_factor" label="输入(未命中)计费系数" value={draft.billing_uncached_input_factor} type="number" step="any" onChange={setField} />
+        <ControlledField name="billing_cached_input_factor" label="输入(缓存)计费系数" value={draft.billing_cached_input_factor} type="number" step="any" onChange={setField} />
+        <ControlledField name="billing_output_factor" label="输出计费系数" value={draft.billing_output_factor} type="number" step="any" onChange={setField} />
+      </div>
       <div className="field">
-        <span>Codex 额度响应头</span>
+        <span>额度响应头</span>
         <div className="segmented">
           <button type="button" className={(draft.codex_quota_headers_mode || "block") === "block" ? "active" : ""} onClick={() => setField("codex_quota_headers_mode", "block")}>屏蔽</button>
           <button type="button" className={draft.codex_quota_headers_mode === "rewrite" ? "active" : ""} onClick={() => setField("codex_quota_headers_mode", "rewrite")}>重写</button>
@@ -710,9 +718,10 @@ function CodePreview({ title, value }) {
   );
 }
 
-function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
+function CallRecordsPage({ pageData, summary, accounts, settings, onMessage, onQuery }) {
   const { query, pageSizeDraft, setField, search, runWithPatch, setPageSizeDraft, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
   const pageTotals = sumCallRecords(pageData.items);
+  const billingFactors = billingFactorsFromSettings(settings);
   async function copyValue(value) {
     const text = String(value || "").trim();
     if (!text) return;
@@ -750,10 +759,11 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
                 <strong>{item.account_name}</strong>
                 <b title={`总计：${formatTokenNumber(item.total_tokens)}`}>总计: {formatCompactNumber(item.total_tokens)}</b>
               </div>
-              <small title={cachedInputTitle(item.cached_input_tokens)}>
+              <small title={cachedInputTitle(item.input_tokens, item.cached_input_tokens)}>
                 输入<span title={`输入：${formatTokenNumber(item.input_tokens)}`}>{formatCompactNumber(item.input_tokens)}</span>
                 (未命中<span title={`未命中：${formatUncachedInput(item.input_tokens, item.cached_input_tokens)}`}>{formatCompactUncachedInput(item.input_tokens, item.cached_input_tokens)}</span>)
                 /输出<span title={`输出：${formatTokenNumber(item.output_tokens)}`}>{formatCompactNumber(item.output_tokens)}</span>
+                /计费系数<span title={billingCoefficientTitle(item, billingFactors)}>{formatBillingCoefficient(item, billingFactors)}</span>
               </small>
             </button>
           ))}
@@ -761,7 +771,7 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
       )}
       <div className="table-wrap">
         <table>
-          <thead><tr><th className="time-col">时间</th><th className="account-col">账号</th><th>会话 ID</th><th>客户端路径</th><th className="call-status-col">状态</th><th>耗时</th><th>输入(未命中)</th><th className="output-col">输出</th><th>总计</th></tr></thead>
+          <thead><tr><th className="time-col">时间</th><th className="account-col">账号</th><th>会话 ID</th><th>客户端路径</th><th className="call-status-col">状态</th><th>耗时</th><th>输入(未命中)</th><th className="output-col">输出</th><th>总计</th><th>计费系数</th></tr></thead>
           <tbody>
             {pageData.items.map((log) => (
               <tr key={log.id}>
@@ -796,9 +806,10 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
                 <td className="url-cell" title={log.request_path || ""}>{log.request_path || "-"}</td>
                 <td className="call-status-col">{log.status || "-"}</td>
                 <td>{log.duration_ms ? `${log.duration_ms} ms` : "-"}</td>
-                <td title={cachedInputTitle(log.cached_input_tokens)}>{formatUncachedPair(log.input_tokens, log.cached_input_tokens)}</td>
+                <td title={cachedInputTitle(log.input_tokens, log.cached_input_tokens)}>{formatUncachedPair(log.input_tokens, log.cached_input_tokens)}</td>
                 <td className="output-col">{formatTokenNumber(log.output_tokens)}</td>
                 <td>{formatTokenNumber(log.total_tokens)}</td>
+                <td>{formatBillingCoefficient(log, billingFactors)}</td>
               </tr>
             ))}
           </tbody>
@@ -808,9 +819,10 @@ function CallRecordsPage({ pageData, summary, accounts, onMessage, onQuery }) {
                 <td>合计</td>
                 <td colSpan={4}></td>
                 <td>{formatDurationTotal(pageTotals.duration_ms)}</td>
-                <td title={cachedInputTitle(pageTotals.cached_input_tokens)}>{formatUncachedPair(pageTotals.input_tokens, pageTotals.cached_input_tokens)}</td>
+                <td title={cachedInputTitle(pageTotals.input_tokens, pageTotals.cached_input_tokens)}>{formatUncachedPair(pageTotals.input_tokens, pageTotals.cached_input_tokens)}</td>
                 <td className="output-col">{formatTokenNumber(pageTotals.output_tokens)}</td>
                 <td>{formatTokenNumber(pageTotals.total_tokens)}</td>
+                <td>{formatBillingCoefficient(pageTotals, billingFactors)}</td>
               </tr>
             </tfoot>
           )}
@@ -991,11 +1003,11 @@ function Field({ label, name, value, type = "text", secret }) {
   );
 }
 
-function ControlledField({ label, name, value, type = "text", onChange }) {
+function ControlledField({ label, name, value, type = "text", step, onChange }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <input name={name} value={value ?? ""} type={type} onChange={(event) => onChange(name, event.target.value)} />
+      <input name={name} value={value ?? ""} type={type} step={step} onChange={(event) => onChange(name, event.target.value)} />
     </label>
   );
 }
@@ -1032,8 +1044,51 @@ function formatCompactUncachedInput(input, cached) {
   return formatCompactNumber(Math.max(0, Number(input || 0) - Number(cached || 0)));
 }
 
-function cachedInputTitle(cached) {
-  return `缓存：${formatTokenNumber(cached)}`;
+function cachedInputTitle(input, cached) {
+  return `缓存：${formatTokenNumber(cached)}；命中率：${formatCacheHitRate(input, cached)}`;
+}
+
+function formatCacheHitRate(input, cached) {
+  const inputTokens = Number(input || 0);
+  if (inputTokens <= 0) return "0.00%";
+  return `${((Number(cached || 0) / inputTokens) * 100).toFixed(2)}%`;
+}
+
+function billingFactorsFromSettings(settings = {}) {
+  return {
+    uncachedInput: numberOrDefault(settings.billing_uncached_input_factor, 125),
+    cachedInput: numberOrDefault(settings.billing_cached_input_factor, 12.5),
+    output: numberOrDefault(settings.billing_output_factor, 750)
+  };
+}
+
+function formatBillingCoefficient(item, factors) {
+  return billingCoefficient(item, factors).toFixed(2);
+}
+
+function billingCoefficientTitle(item, factors) {
+  const input = Number(item?.input_tokens || 0);
+  const cached = Number(item?.cached_input_tokens || 0);
+  const uncached = Math.max(0, input - cached);
+  const output = Number(item?.output_tokens || 0);
+  return [
+    `输入(未命中)：${formatTokenNumber(uncached)} × ${factors.uncachedInput}`,
+    `输入(缓存)：${formatTokenNumber(cached)} × ${factors.cachedInput}`,
+    `输出：${formatTokenNumber(output)} × ${factors.output}`
+  ].join("；");
+}
+
+function billingCoefficient(item, factors) {
+  const input = Number(item?.input_tokens || 0);
+  const cached = Number(item?.cached_input_tokens || 0);
+  const uncached = Math.max(0, input - cached);
+  const output = Number(item?.output_tokens || 0);
+  return ((factors.uncachedInput * uncached) + (factors.cachedInput * cached) + (factors.output * output)) / 1_000_000;
+}
+
+function numberOrDefault(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function formatTokenNumber(value) {

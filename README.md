@@ -4,7 +4,7 @@
 
 **Disclaimer**: This project is for learning and local development only. Users must comply with the Terms of Service of the relevant platforms. It is intended for personal local use and does not provide or distribute accounts, API keys, or proxy services. It must not be used for multi-user sharing, commercial resale, bypassing limits, or any other activity that violates service terms. Use it at your own risk.
 
-Codex Gateway is a local desktop app for managing personal Codex/ChatGPT login state, viewing quota information, and exposing a local `/v1/responses` gateway for Codex. It is built with Electron, React, and Vite, with local data stored in SQLite.
+Codex Gateway is a local desktop app for managing personal Codex/ChatGPT login state, viewing quota information, and exposing a local gateway for Codex. It is built with Electron, React, and Vite, with local data stored in SQLite.
 
 ### Features
 
