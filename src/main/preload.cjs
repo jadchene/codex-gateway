@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("codexGateway", {
   importLocalCodexAccount: () => ipcRenderer.invoke("accounts:importLocalCodex"),
   listTokenLogs: (query) => ipcRenderer.invoke("tokens:list", query),
   tokenSummary: (query) => ipcRenderer.invoke("tokens:summary", query),
+  quotaSummary: () => ipcRenderer.invoke("quota:summary"),
   clearTokenLogs: () => ipcRenderer.invoke("tokens:clear"),
   listAppLogs: (query) => ipcRenderer.invoke("appLogs:list", query),
   clearAppLogs: () => ipcRenderer.invoke("appLogs:clear"),

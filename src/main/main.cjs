@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { browserDataDir } = require("./paths.cjs");
 const { createStore } = require("./store.cjs");
-const { createGateway } = require("./gateway.cjs");
+const { createGateway, buildCodexQuotaHeaderDetail } = require("./gateway.cjs");
 const { createAuthService, accountFromTokens } = require("./auth.cjs");
 const { normalizeUsagePayload } = require("./quota.cjs");
 const { applyGatewayMode, applyAccountMode, detectCodexAuthMode } = require("./codex-cli-auth.cjs");
@@ -233,6 +233,7 @@ function registerIpc() {
     accounts: store.listAccounts(),
     tokenLogs: store.listTokenLogs(),
     tokenSummary: store.tokenSummary(),
+    quotaSummary: gatewayQuotaSummary(),
     appLogs: store.listAppLogs(),
     gateway: gateway.status(),
     paths: store.paths
@@ -258,6 +259,7 @@ function registerIpc() {
   ipcMain.handle("accounts:list", () => store.listAccounts());
   ipcMain.handle("tokens:list", (_event, query) => store.listTokenLogs(query));
   ipcMain.handle("tokens:summary", (_event, query) => store.tokenSummary(query));
+  ipcMain.handle("quota:summary", () => gatewayQuotaSummary());
   ipcMain.handle("tokens:clear", () => {
     const result = store.clearTokenLogs();
     store.addAppLog({
@@ -305,6 +307,24 @@ function registerIpc() {
   });
   ipcMain.handle("accounts:refreshAllUsage", async () => refreshAllUsage("manual"));
   ipcMain.handle("accounts:importLocalCodex", async () => importLocalCodexAccount());
+}
+
+function gatewayQuotaSummary() {
+  const detail = buildCodexQuotaHeaderDetail(store.listAccounts());
+  const primaryUsed = Number(detail.headers["x-codex-primary-used-percent"] || 0);
+  const secondaryUsed = Number(detail.headers["x-codex-secondary-used-percent"] || 0);
+  return {
+    primary: {
+      remaining_percent: Math.max(0, Math.min(100, 100 - primaryUsed)),
+      reset_after_seconds: detail.primary.value,
+      reset_at: detail.primary.selected?.reset_at || 0
+    },
+    secondary: {
+      remaining_percent: Math.max(0, Math.min(100, 100 - secondaryUsed)),
+      reset_after_seconds: detail.secondary.value,
+      reset_at: detail.secondary.selected?.reset_at || 0
+    }
+  };
 }
 
 async function startGateway(reason = "manual") {

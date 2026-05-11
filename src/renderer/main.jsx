@@ -21,6 +21,7 @@ function App() {
   const [tokenLogs, setTokenLogs] = useState({ items: [], total: 0, page: 1, pageSize: 10 });
   const [tokenSummary, setTokenSummary] = useState({ total: {}, byAccount: [] });
   const [dashboardSummary, setDashboardSummary] = useState({ total: {}, byAccount: [] });
+  const [quotaSummary, setQuotaSummary] = useState({ primary: {}, secondary: {} });
   const [appLogs, setAppLogs] = useState({ items: [], total: 0, page: 1, pageSize: 10 });
   const [gateway, setGateway] = useState({ running: false, url: "" });
   const [paths, setPaths] = useState({});
@@ -38,6 +39,7 @@ function App() {
     setTokenLogs(data.tokenLogs);
     setTokenSummary(data.tokenSummary || { total: {}, byAccount: [] });
     setDashboardSummary(data.tokenSummary || { total: {}, byAccount: [] });
+    setQuotaSummary(data.quotaSummary || { primary: {}, secondary: {} });
     setAppLogs(data.appLogs);
     setGateway(data.gateway);
     setPaths(data.paths);
@@ -76,6 +78,7 @@ function App() {
         try {
           if (next.has("accounts")) {
             setAccounts(await api.listAccounts());
+            setQuotaSummary(await api.quotaSummary());
           }
           if (next.has("tokenLogs") || next.has("tokenSummary")) {
             const current = tokenLogsRef.current || {};
@@ -276,7 +279,7 @@ function App() {
       <section className="content">
         {message && <div className="toast" role="status">{message}</div>}
 
-        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} tokenSummary={dashboardSummary} />}
+        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} tokenSummary={dashboardSummary} quotaSummary={quotaSummary} />}
         {page === "accounts" && (
           <AccountsPage
             accounts={accounts}
@@ -352,7 +355,7 @@ function App() {
   );
 }
 
-function Dashboard({ accounts, gateway, tokenSummary }) {
+function Dashboard({ accounts, gateway, tokenSummary, quotaSummary }) {
   const usable = accounts.filter(isUsableAccount).length;
   const total = tokenSummary?.total || {};
   return (
@@ -366,6 +369,10 @@ function Dashboard({ accounts, gateway, tokenSummary }) {
       <div className="dashboard-grid">
         <Metric title="可用账号" value={`${usable}/${accounts.length}`} />
         <Metric title="网关状态" value={gateway.running ? "运行中" : "未启动"} />
+      </div>
+      <div className="dashboard-grid quota-metric-grid">
+        <QuotaMetric title="5 小时剩余额度" detail={quotaSummary?.primary} />
+        <QuotaMetric title="7 天剩余额度" detail={quotaSummary?.secondary} />
       </div>
       <div className="divider-title">今日网关数据统计</div>
       <div className="dashboard-grid">
@@ -961,6 +968,18 @@ function Metric({ title, value, hint }) {
     : value;
   const titleText = hint || "";
   return <article className="panel metric" title={titleText}><span>{title}</span><strong>{displayValue}</strong></article>;
+}
+
+function QuotaMetric({ title, detail }) {
+  const remaining = Math.max(0, Math.min(100, Number(detail?.remaining_percent || 0)));
+  const resetAt = Number(detail?.reset_at || 0);
+  return (
+    <article className="panel metric quota-summary-metric">
+      <span>{title}</span>
+      <strong>{remaining.toFixed(1)}%</strong>
+      <small>重置：{formatTime(resetAt)}</small>
+    </article>
+  );
 }
 
 function Field({ label, name, value, type = "text", secret }) {

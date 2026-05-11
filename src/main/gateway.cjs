@@ -672,6 +672,7 @@ module.exports = {
   buildGatewayRequest,
   matchGatewayRoute,
   buildCodexQuotaHeaders,
+  buildCodexQuotaHeaderDetail,
   callWithFailover,
   syncAccountUsageFromHeaders,
   extractTokenUsage,

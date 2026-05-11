@@ -252,6 +252,10 @@ h1 {
   gap: 18px;
 }
 
+.quota-metric-grid {
+  margin-top: 18px;
+}
+
 .divider-title {
   margin: 18px 0 12px;
   padding-top: 16px;
@@ -277,6 +281,11 @@ h1 {
 
 .metric strong {
   font-size: 28px;
+}
+
+.quota-summary-metric small {
+  color: #667085;
+  font-size: 13px;
 }
 
 .account-grid {
