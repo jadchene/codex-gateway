@@ -65,10 +65,11 @@ async function handleRequest(req, res, store, authService, hooks) {
   try {
     const incomingBody = await readBody(req);
     request = buildGatewayRequest(settings.upstream_base_url, req.url, incomingBody, req.headers);
-    const firstAccount = pickGatewayAccount(store.listAccounts());
+    const firstAccount = pickGatewayAccount(store.listAccounts(), settings.gateway_current_account_id || "");
     if (!firstAccount) {
       return sendJson(res, 503, { error: { message: "The server is currently unavailable. Please try again later." } });
     }
+    saveCurrentGatewayAccount(store, firstAccount);
     accountForLog = firstAccount;
 
     const { account, response, body, tokenUsage: errorUsage } = await callWithFailover(req, request, firstAccount, settings, store, hooks);
@@ -185,8 +186,10 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
   const excluded = new Set();
   let account = firstAccount;
   let lastResult = null;
-  let refreshedUsage = false;
-  for (let attempt = 0; attempt < 8 && account; attempt += 1) {
+  let lastAccount = null;
+  const maxAttempts = Math.max(1, store.listAccounts().length);
+  for (let attempt = 0; attempt < maxAttempts && account; attempt += 1) {
+    lastAccount = account;
     let result = await callUpstream(req, request, account, settings);
     if (isAuthExpiredResponse(result.response.status, result.body) && hooks.refreshAccountToken) {
       try {
@@ -204,39 +207,34 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
         });
       }
     }
+    const syncedUsage = syncAccountUsageFromHeaders(account, result.response.headers, store);
     if (!isQuotaExhaustedResponse(result.response.status, result.body)) {
-      markFullFiveHourAccountUsed(account, store);
+      saveCurrentGatewayAccount(store, account);
       return { account, ...result };
     }
     lastResult = result;
+    if (!syncedUsage) markAccountQuotaExhausted(account, store);
     excluded.add(account.id);
-    if (!refreshedUsage && hooks.refreshAllUsage) {
-      refreshedUsage = true;
-      store.addAppLog({
-        level: "warn",
-        scope: "gateway",
-        action: "quota-failover",
-        status: String(result.response.status),
-        message: `${request.path} 触发额度/限流信号，刷新全部账号后切换账号重试`
-      });
-      await hooks.refreshAllUsage("gateway-quota-failover");
-    }
-    account = pickGatewayAccount(store.listAccounts(), Array.from(excluded));
+    account = pickGatewayAccount(store.listAccounts(), "", Array.from(excluded));
   }
-  if (lastResult) return { account: firstAccount, ...lastResult };
+  if (lastResult) return { account: lastAccount || firstAccount, ...lastResult };
   throw new Error("No enabled GPT account with an access token is available.");
 }
 
-function markFullFiveHourAccountUsed(account, store) {
-  if (!account?.id || Number(account.quota_5h_used_percent || 0) > 0) return;
-  account.quota_5h_used_percent = 1;
-  account.quota_5h_reset_at = Math.floor(Date.now() / 1000) + 18_000;
+function saveCurrentGatewayAccount(store, account) {
+  if (account?.id) store.saveSettings({ gateway_current_account_id: account.id });
+}
+
+function markAccountQuotaExhausted(account, store) {
+  if (!account?.id || !store?.updateUsage) return;
   store.updateUsage(account.id, {
-    quota_5h_used_percent: 1,
-    quota_5h_reset_at: account.quota_5h_reset_at,
-    quota_7d_used_percent: null,
-    quota_7d_reset_at: null,
-    raw_usage_json: null
+    quota_5h_used_percent: 100,
+    quota_5h_reset_at: Math.floor(Date.now() / 1000) + 18_000,
+    raw_usage_json: JSON.stringify({
+      source: "gateway-quota-failover",
+      at: Math.floor(Date.now() / 1000),
+      reason: "quota response without codex quota headers"
+    })
   });
 }
 
@@ -260,6 +258,52 @@ async function callUpstream(req, request, account, settings) {
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function syncAccountUsageFromHeaders(account, headers, store) {
+  if (!account?.id || !headers || !store?.updateUsage) return false;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const usage = {};
+  const primaryUsed = numberHeader(headers, "x-codex-primary-used-percent");
+  const primaryResetAfter = numberHeader(headers, "x-codex-primary-reset-after-seconds");
+  const secondaryUsed = numberHeader(headers, "x-codex-secondary-used-percent");
+  const secondaryResetAfter = numberHeader(headers, "x-codex-secondary-reset-after-seconds");
+
+  if (Number.isFinite(primaryUsed)) usage.quota_5h_used_percent = clampPercent(primaryUsed);
+  if (Number.isFinite(primaryResetAfter)) usage.quota_5h_reset_at = nowSeconds + Math.max(0, Math.trunc(primaryResetAfter));
+  if (Number.isFinite(secondaryUsed)) usage.quota_7d_used_percent = clampPercent(secondaryUsed);
+  if (Number.isFinite(secondaryResetAfter)) usage.quota_7d_reset_at = nowSeconds + Math.max(0, Math.trunc(secondaryResetAfter));
+  if (Object.keys(usage).length > 0) {
+    usage.raw_usage_json = JSON.stringify({
+      source: "gateway-response-headers",
+      at: nowSeconds,
+      headers: {
+        "x-codex-primary-used-percent": headerGet(headers, "x-codex-primary-used-percent"),
+        "x-codex-primary-reset-after-seconds": headerGet(headers, "x-codex-primary-reset-after-seconds"),
+        "x-codex-secondary-used-percent": headerGet(headers, "x-codex-secondary-used-percent"),
+        "x-codex-secondary-reset-after-seconds": headerGet(headers, "x-codex-secondary-reset-after-seconds")
+      }
+    });
+    store.updateUsage(account.id, usage);
+    return true;
+  }
+  return false;
+}
+
+function numberHeader(headers, name) {
+  const raw = headerGet(headers, name);
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function headerGet(headers, name) {
+  if (typeof headers.get === "function") return headers.get(name);
+  const lower = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers || {})) {
+    if (key.toLowerCase() === lower) return Array.isArray(value) ? value[0] : value;
+  }
+  return null;
 }
 
 const BLOCKED_RESPONSE_HEADERS = new Set([
@@ -628,6 +672,8 @@ module.exports = {
   buildGatewayRequest,
   matchGatewayRoute,
   buildCodexQuotaHeaders,
+  callWithFailover,
+  syncAccountUsageFromHeaders,
   extractTokenUsage,
   isQuotaExhaustedResponse,
   isAuthExpiredResponse

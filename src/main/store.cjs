@@ -129,7 +129,8 @@ function migrate(db) {
     close_behavior: "exit",
     codex_quota_headers_mode: "block",
     codex_auth_mode: "gateway",
-    codex_selected_account_id: ""
+    codex_selected_account_id: "",
+    gateway_current_account_id: ""
   };
   const insert = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
   for (const [key, value] of Object.entries(defaults)) insert.run(key, value);

@@ -11,13 +11,15 @@ const {
   buildGatewayRequest,
   buildUpstreamHeaders,
   buildUpstreamUrl,
+  callWithFailover,
   extractTokenUsage,
   isAuthExpiredResponse,
   isQuotaExhaustedResponse,
-  matchGatewayRoute
+  matchGatewayRoute,
+  syncAccountUsageFromHeaders
 } = require("../src/main/gateway.cjs");
 
-test("pickGatewayAccount chooses enabled token account with lowest quota usage", () => {
+test("pickGatewayAccount chooses the first enabled token account by priority order", () => {
   resetSelectionState();
   const account = pickGatewayAccount([
     { id: "disabled", enabled: false, access_token: "a", status: "active", quota_5h_used_percent: 0 },
@@ -47,7 +49,7 @@ test("pickGatewayAccount can exclude failed accounts", () => {
   const account = pickGatewayAccount([
     { id: "first", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 1 },
     { id: "second", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 20 }
-  ], ["first"]);
+  ], "", ["first"]);
   assert.equal(account.id, "second");
 });
 
@@ -64,55 +66,40 @@ test("quotaWindowExhausted marks accounts with a depleted window unavailable", (
   ]).id, "usable");
 });
 
-test("pickGatewayAccount rotates full 5h remaining accounts first", () => {
+test("pickGatewayAccount keeps the current database account until exhausted", () => {
   resetSelectionState();
   const accounts = [
-    { id: "full-a", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 0 },
-    { id: "full-b", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 0 },
-    { id: "partial", enabled: true, access_token: "c", status: "active", quota_5h_used_percent: 10 }
+    { id: "less-used", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 10 },
+    { id: "current", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 95 }
   ];
-  assert.equal(pickGatewayAccount(accounts).id, "full-a");
-  assert.equal(pickGatewayAccount(accounts).id, "full-b");
-  assert.equal(pickGatewayAccount(accounts).id, "full-a");
+  assert.equal(pickGatewayAccount(accounts, "current").id, "current");
 });
 
-test("pickGatewayAccount falls back to lower 5h usage when no full account exists", () => {
+test("pickGatewayAccount falls back to fixed order when no current account exists", () => {
   resetSelectionState();
   const account = pickGatewayAccount([
     { id: "more-used", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 40 },
     { id: "less-used", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 15 }
   ]);
-  assert.equal(account.id, "less-used");
+  assert.equal(account.id, "more-used");
 });
 
-test("pickGatewayAccount sticks to a healthy partial account", () => {
+test("pickGatewayAccount switches current account only when exhausted", () => {
   resetSelectionState();
   const accounts = [
-    { id: "first", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 20 },
-    { id: "second", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 30 }
-  ];
-  assert.equal(pickGatewayAccount(accounts).id, "first");
-  assert.equal(pickGatewayAccount(accounts).id, "first");
-});
-
-test("pickGatewayAccount switches away when remaining 5h quota is below threshold", () => {
-  resetSelectionState();
-  assert.equal(pickGatewayAccount([
-    { id: "current", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 20 }
-  ]).id, "current");
-  assert.equal(pickGatewayAccount([
-    { id: "current", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 96 },
+    { id: "current", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 100 },
     { id: "next", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 40 }
-  ]).id, "next");
+  ];
+  assert.equal(pickGatewayAccount(accounts, "current").id, "next");
 });
 
-test("pickGatewayAccount uses low remaining accounts only when unavoidable", () => {
+test("pickGatewayAccount keeps low remaining accounts usable until exhausted", () => {
   resetSelectionState();
   const account = pickGatewayAccount([
     { id: "almost-empty", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 97 },
     { id: "least-empty", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 96 }
   ]);
-  assert.equal(account.id, "least-empty");
+  assert.equal(account.id, "almost-empty");
 });
 
 test("buildUpstreamUrl maps local /v1 requests to codex backend prefix", () => {
@@ -255,6 +242,182 @@ test("buildCodexQuotaHeaders subtracts stacked remaining quota from 100", () => 
     { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 80 }
   ], 500);
   assert.equal(headers["x-codex-primary-used-percent"], "70");
+});
+
+test("syncAccountUsageFromHeaders stores quota snapshots for the active account", () => {
+  let updated = null;
+  syncAccountUsageFromHeaders(
+    { id: "active" },
+    new Headers({
+      "x-codex-primary-used-percent": "67.5",
+      "x-codex-primary-reset-after-seconds": "120",
+      "x-codex-secondary-used-percent": "12",
+      "x-codex-secondary-reset-after-seconds": "240"
+    }),
+    {
+      updateUsage(id, usage) {
+        updated = { id, usage };
+      }
+    }
+  );
+  assert.equal(updated.id, "active");
+  assert.equal(updated.usage.quota_5h_used_percent, 67.5);
+  assert.equal(updated.usage.quota_7d_used_percent, 12);
+  assert.ok(updated.usage.quota_5h_reset_at > Math.floor(Date.now() / 1000));
+  assert.ok(updated.usage.quota_7d_reset_at > updated.usage.quota_5h_reset_at);
+});
+
+test("callWithFailover stores quota headers and switches current account after exhaustion", async () => {
+  const originalFetch = globalThis.fetch;
+  const accounts = [
+    { id: "first", enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 50, quota_7d_used_percent: 20 },
+    { id: "second", enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 10, quota_7d_used_percent: 20 }
+  ];
+  const savedSettings = [];
+  let refreshAllCalled = false;
+  let fetchCount = 0;
+  globalThis.fetch = async () => {
+    const call = fetchCount;
+    fetchCount += 1;
+    if (call === 0) {
+      return new Response("quota exceeded", {
+        status: 429,
+        headers: {
+          "x-codex-primary-used-percent": "100",
+          "x-codex-primary-reset-after-seconds": "1800"
+        }
+      });
+    }
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    const result = await callWithFailover(
+      { method: "POST", headers: {} },
+      { upstreamUrl: "https://example.test/responses", path: "/v1/responses", body: Buffer.from("{}") },
+      accounts[0],
+      {},
+      {
+        listAccounts: () => accounts,
+        saveSettings: (patch) => savedSettings.push(patch),
+        addAppLog: () => {},
+        updateUsage(id, usage) {
+          const account = accounts.find((item) => item.id === id);
+          Object.assign(account, usage);
+        }
+      },
+      {
+        refreshAllUsage: async () => {
+          refreshAllCalled = true;
+        }
+      }
+    );
+    assert.equal(result.account.id, "second");
+    assert.equal(accounts[0].quota_5h_used_percent, 100);
+    assert.equal(savedSettings.at(-1).gateway_current_account_id, "second");
+    assert.equal(refreshAllCalled, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("callWithFailover marks no-header quota failures exhausted without saving a failed account", async () => {
+  const originalFetch = globalThis.fetch;
+  const accounts = [
+    { id: "first", enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 50 },
+    { id: "second", enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 10 }
+  ];
+  const savedSettings = [];
+  globalThis.fetch = async () => new Response("quota exceeded", { status: 429 });
+  try {
+    const result = await callWithFailover(
+      { method: "POST", headers: {} },
+      { upstreamUrl: "https://example.test/responses", path: "/v1/responses", body: Buffer.from("{}") },
+      accounts[0],
+      {},
+      {
+        listAccounts: () => accounts,
+        saveSettings: (patch) => savedSettings.push(patch),
+        addAppLog: () => {},
+        updateUsage(id, usage) {
+          const account = accounts.find((item) => item.id === id);
+          Object.assign(account, usage);
+        }
+      },
+      {}
+    );
+    assert.equal(result.account.id, "second");
+    assert.equal(accounts[0].quota_5h_used_percent, 100);
+    assert.equal(accounts[1].quota_5h_used_percent, 100);
+    assert.equal(savedSettings.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("callWithFailover returns the last attempted account when all accounts fail", async () => {
+  const originalFetch = globalThis.fetch;
+  const accounts = [
+    { id: "first", enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 50 },
+    { id: "second", enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 10 }
+  ];
+  globalThis.fetch = async () => new Response("quota exceeded", { status: 429 });
+  try {
+    const result = await callWithFailover(
+      { method: "POST", headers: {} },
+      { upstreamUrl: "https://example.test/responses", path: "/v1/responses", body: Buffer.from("{}") },
+      accounts[0],
+      {},
+      {
+        listAccounts: () => accounts,
+        saveSettings: () => {},
+        addAppLog: () => {},
+        updateUsage: () => {}
+      },
+      {}
+    );
+    assert.equal(result.account.id, "second");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("callWithFailover can reach accounts beyond the first eight candidates", async () => {
+  const originalFetch = globalThis.fetch;
+  const accounts = Array.from({ length: 9 }, (_, index) => ({
+    id: `account-${index + 1}`,
+    enabled: true,
+    status: "active",
+    access_token: `token-${index + 1}`,
+    quota_5h_used_percent: 10
+  }));
+  let fetchCount = 0;
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    if (fetchCount < 9) return new Response("quota exceeded", { status: 429 });
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    const result = await callWithFailover(
+      { method: "POST", headers: {} },
+      { upstreamUrl: "https://example.test/responses", path: "/v1/responses", body: Buffer.from("{}") },
+      accounts[0],
+      {},
+      {
+        listAccounts: () => accounts,
+        saveSettings: () => {},
+        addAppLog: () => {},
+        updateUsage(id, usage) {
+          const account = accounts.find((item) => item.id === id);
+          Object.assign(account, usage);
+        }
+      },
+      {}
+    );
+    assert.equal(result.account.id, "account-9");
+    assert.equal(fetchCount, 9);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("matchGatewayRoute validates both path and method", () => {
