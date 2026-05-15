@@ -12,10 +12,12 @@ const {
   buildUpstreamHeaders,
   buildUpstreamUrl,
   callWithFailover,
+  dailyRebalanceDateKey,
   extractTokenUsage,
   isAuthExpiredResponse,
   isQuotaExhaustedResponse,
   matchGatewayRoute,
+  selectInitialGatewayAccount,
   syncAccountUsageFromHeaders
 } = require("../src/main/gateway.cjs");
 
@@ -100,6 +102,54 @@ test("pickGatewayAccount keeps low remaining accounts usable until exhausted", (
     { id: "least-empty", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 96 }
   ]);
   assert.equal(account.id, "almost-empty");
+});
+
+test("pickGatewayAccount can prefer the account with more seven-day quota", () => {
+  resetSelectionState();
+  const account = pickGatewayAccount([
+    { id: "current", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 5, quota_7d_used_percent: 70 },
+    { id: "weekly-room", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 95, quota_7d_used_percent: 20 }
+  ], "current", [], { preferSevenDayQuota: true });
+  assert.equal(account.id, "weekly-room");
+});
+
+test("selectInitialGatewayAccount rebalances once per local day", () => {
+  resetSelectionState();
+  const accounts = [
+    { id: "current", enabled: true, access_token: "a", status: "active", quota_5h_used_percent: 0, quota_7d_used_percent: 70 },
+    { id: "weekly-room", enabled: true, access_token: "b", status: "active", quota_5h_used_percent: 10, quota_7d_used_percent: 20 }
+  ];
+  const savedSettings = [];
+  const appLogs = [];
+  const store = {
+    listAccounts: () => accounts,
+    saveSettings: (patch) => savedSettings.push(patch),
+    addAppLog: (entry) => appLogs.push(entry)
+  };
+
+  const picked = selectInitialGatewayAccount(
+    store,
+    { gateway_current_account_id: "current", gateway_last_daily_rebalance_date: "2026-05-14" },
+    new Date("2026-05-15T08:00:00")
+  );
+  assert.equal(picked.id, "weekly-room");
+  assert.deepEqual(savedSettings.at(-1), {
+    gateway_current_account_id: "weekly-room",
+    gateway_last_daily_rebalance_date: "2026-05-15"
+  });
+  assert.equal(appLogs.at(-1).action, "daily-rebalance");
+
+  const kept = selectInitialGatewayAccount(
+    store,
+    { gateway_current_account_id: "current", gateway_last_daily_rebalance_date: "2026-05-15" },
+    new Date("2026-05-15T20:00:00")
+  );
+  assert.equal(kept.id, "current");
+  assert.deepEqual(savedSettings.at(-1), { gateway_current_account_id: "current" });
+});
+
+test("dailyRebalanceDateKey uses the local calendar day", () => {
+  assert.equal(dailyRebalanceDateKey(new Date("2026-05-15T08:00:00")), "2026-05-15");
 });
 
 test("buildUpstreamUrl maps local /v1 requests to codex backend prefix", () => {

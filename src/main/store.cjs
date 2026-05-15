@@ -131,6 +131,7 @@ function migrate(db) {
     codex_auth_mode: "gateway",
     codex_selected_account_id: "",
     gateway_current_account_id: "",
+    gateway_last_daily_rebalance_date: "",
     billing_uncached_input_factor: "125",
     billing_cached_input_factor: "12.5",
     billing_output_factor: "750"

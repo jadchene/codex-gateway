@@ -65,11 +65,10 @@ async function handleRequest(req, res, store, authService, hooks) {
   try {
     const incomingBody = await readBody(req);
     request = buildGatewayRequest(settings.upstream_base_url, req.url, incomingBody, req.headers);
-    const firstAccount = pickGatewayAccount(store.listAccounts(), settings.gateway_current_account_id || "");
+    const firstAccount = selectInitialGatewayAccount(store, settings);
     if (!firstAccount) {
       return sendJson(res, 503, { error: { message: "The server is currently unavailable. Please try again later." } });
     }
-    saveCurrentGatewayAccount(store, firstAccount);
     accountForLog = firstAccount;
 
     const { account, response, body, tokenUsage: errorUsage } = await callWithFailover(req, request, firstAccount, settings, store, hooks);
@@ -166,6 +165,39 @@ const GATEWAY_ROUTES = {
   "/v1/responses": ["POST"],
   "/v1/responses/compact": ["POST"]
 };
+
+function selectInitialGatewayAccount(store, settings, now = new Date()) {
+  const options = dailyRebalanceOptions(settings, now);
+  const account = pickGatewayAccount(store.listAccounts(), settings.gateway_current_account_id || "", [], options);
+  if (!account) return null;
+  const patch = { gateway_current_account_id: account.id };
+  if (options.dailyRebalanceDate) patch.gateway_last_daily_rebalance_date = options.dailyRebalanceDate;
+  store.saveSettings(patch);
+  if (options.dailyRebalanceDate && store.addAppLog) {
+    store.addAppLog({
+      scope: "gateway",
+      action: "daily-rebalance",
+      status: "success",
+      message: `当天首次网关请求按 7 天剩余额度选择账号：${account.email || account.name || account.id}`
+    });
+  }
+  return account;
+}
+
+function dailyRebalanceOptions(settings, now = new Date()) {
+  const today = dailyRebalanceDateKey(now);
+  if (!today || settings.gateway_last_daily_rebalance_date === today) return {};
+  return { preferSevenDayQuota: true, dailyRebalanceDate: today };
+}
+
+function dailyRebalanceDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const year = date.getFullYear();
+  if (!Number.isFinite(year)) return "";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function matchGatewayRoute(method, pathname) {
   const allowedMethods = GATEWAY_ROUTES[pathname] || [];
@@ -674,6 +706,8 @@ module.exports = {
   buildCodexQuotaHeaders,
   buildCodexQuotaHeaderDetail,
   callWithFailover,
+  selectInitialGatewayAccount,
+  dailyRebalanceDateKey,
   syncAccountUsageFromHeaders,
   extractTokenUsage,
   isQuotaExhaustedResponse,
