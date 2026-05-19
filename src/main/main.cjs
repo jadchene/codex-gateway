@@ -233,6 +233,7 @@ function registerIpc() {
     accounts: store.listAccounts(),
     tokenLogs: store.listTokenLogs(),
     tokenSummary: store.tokenSummary(),
+    codexSessions: store.listCodexSessions(),
     quotaSummary: gatewayQuotaSummary(),
     appLogs: store.listAppLogs(),
     gateway: gateway.status(),
@@ -257,6 +258,8 @@ function registerIpc() {
     return store.listAccounts();
   });
   ipcMain.handle("accounts:list", () => store.listAccounts());
+  ipcMain.handle("sessions:list", (_event, query) => store.listCodexSessions(query));
+  ipcMain.handle("sessions:save", (_event, session) => store.saveCodexSession(session));
   ipcMain.handle("tokens:list", (_event, query) => store.listTokenLogs(query));
   ipcMain.handle("tokens:summary", (_event, query) => store.tokenSummary(query));
   ipcMain.handle("quota:summary", () => gatewayQuotaSummary());

@@ -7,6 +7,7 @@ const pages = [
   { id: "accounts", label: "账号管理" },
   { id: "auth", label: "认证管理" },
   { id: "gateway", label: "网关服务" },
+  { id: "sessions", label: "会话管理" },
   { id: "logs", label: "调用记录" },
   { id: "appLogs", label: "运行日志" },
   { id: "settings", label: "应用配置" }
@@ -19,6 +20,8 @@ function App() {
   const [settings, setSettings] = useState({});
   const [accounts, setAccounts] = useState([]);
   const [tokenLogs, setTokenLogs] = useState({ items: [], total: 0, page: 1, pageSize: 10 });
+  const [codexSessions, setCodexSessions] = useState({ items: [], total: 0, page: 1, pageSize: 10 });
+  const [sessionQuery, setSessionQuery] = useState({ name: "", page: 1, pageSize: 10 });
   const [tokenSummary, setTokenSummary] = useState({ total: {}, byAccount: [] });
   const [dashboardSummary, setDashboardSummary] = useState({ total: {}, byAccount: [] });
   const [quotaSummary, setQuotaSummary] = useState({ primary: {}, secondary: {} });
@@ -37,6 +40,7 @@ function App() {
     setSettings(data.settings);
     setAccounts(data.accounts);
     setTokenLogs(data.tokenLogs);
+    setCodexSessions(data.codexSessions || { items: [], total: 0, page: 1, pageSize: 10 });
     setTokenSummary(data.tokenSummary || { total: {}, byAccount: [] });
     setDashboardSummary(data.tokenSummary || { total: {}, byAccount: [] });
     setQuotaSummary(data.quotaSummary || { primary: {}, secondary: {} });
@@ -215,6 +219,18 @@ function App() {
     setMessage(next.running ? "网关已启动" : "网关已停止");
   }
 
+  async function saveCodexSession(session) {
+    const saved = await api.saveCodexSession(session);
+    setCodexSessions(await api.listCodexSessions(sessionQuery));
+    setMessage(`会话已保存：${saved.name}`);
+    return saved;
+  }
+
+  async function queryCodexSessions(query) {
+    setSessionQuery(query);
+    setCodexSessions(await api.listCodexSessions(query));
+  }
+
   async function setAccountEnabled(account, enabled) {
     await api.setAccountEnabled(account.id, enabled);
     await reload();
@@ -321,6 +337,15 @@ function App() {
           />
         )}
         {page === "gateway" && <GatewayPage gateway={gateway} gatewayBase={gatewayBase} settings={settings} onToggle={toggleGateway} onMessage={setMessage} />}
+        {page === "sessions" && (
+          <SessionsPage
+            sessions={codexSessions}
+            query={sessionQuery}
+            onQuery={queryCodexSessions}
+            onSave={saveCodexSession}
+            onMessage={setMessage}
+          />
+        )}
         {page === "settings" && (
           <SettingsPage
             settings={settings}
@@ -337,6 +362,7 @@ function App() {
             summary={tokenSummary}
             accounts={accounts}
             settings={settings}
+            onSaveSession={saveCodexSession}
             onMessage={setMessage}
             onQuery={async (query) => {
               setTokenLogs(await api.listTokenLogs(query));
@@ -718,10 +744,156 @@ function CodePreview({ title, value }) {
   );
 }
 
-function CallRecordsPage({ pageData, summary, accounts, settings, onMessage, onQuery }) {
+function SessionsPage({ sessions, query, onQuery, onSave, onMessage }) {
+  const [editing, setEditing] = useState(null);
+  const [nameDraft, setNameDraft] = useState(query.name || "");
+  const [pageSizeDraft, setPageSizeDraft] = useState(sessions.pageSize || query.pageSize || 10);
+  const items = sessions.items || [];
+  const draft = editing || { session_id: "", name: "", note: "" };
+  useEffect(() => {
+    setNameDraft(query.name || "");
+  }, [query.name]);
+  useEffect(() => {
+    setPageSizeDraft(sessions.pageSize || query.pageSize || 10);
+  }, [sessions.pageSize, query.pageSize]);
+  async function copyResumeCommand(sessionId) {
+    const command = `codex resume ${sessionId}`;
+    try {
+      await navigator.clipboard.writeText(command);
+      onMessage(`已复制：${command}`);
+    } catch (error) {
+      onMessage(`复制失败：${error.message}`);
+    }
+  }
+  async function submit(event) {
+    event.preventDefault();
+    try {
+      await onSave(draft);
+      setEditing(null);
+    } catch (error) {
+      onMessage(`保存会话失败：${error.message}`);
+    }
+  }
+  async function search(event) {
+    event.preventDefault();
+    await onQuery({ name: nameDraft, page: 1, pageSize: Number(pageSizeDraft || 10) });
+  }
+  async function nextPage() {
+    await onQuery({
+      name: query.name || "",
+      page: (sessions.page || 1) + 1,
+      pageSize: sessions.pageSize || Number(pageSizeDraft || 10)
+    });
+  }
+  async function prevPage() {
+    await onQuery({
+      name: query.name || "",
+      page: Math.max(1, (sessions.page || 1) - 1),
+      pageSize: sessions.pageSize || Number(pageSizeDraft || 10)
+    });
+  }
+  return (
+    <section className="panel">
+      <div className="section-title">
+        <div>
+          <h2>会话管理</h2>
+          <p className="subtle">维护 Codex 会话 ID 和名称，恢复时复制 resume 命令。</p>
+        </div>
+        <button type="button" className="primary" onClick={() => setEditing({ session_id: "", name: "", note: "" })}>新建</button>
+      </div>
+      <form className="filter-row session-filter-row" onSubmit={search}>
+        <label className="field">
+          <span>会话名称</span>
+          <input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} />
+        </label>
+        <div className="filter-action">
+          <span>操作</span>
+          <button type="submit" className="primary">查询</button>
+        </div>
+      </form>
+      <div className="table-wrap">
+        <table className="sessions-table">
+          <thead><tr><th className="session-name-col">会话名称</th><th className="session-id-col">会话 ID</th><th>备注</th><th className="time-col">创建时间</th><th className="time-col">更新时间</th><th className="session-actions-col">操作</th></tr></thead>
+          <tbody>
+            {items.map((session) => (
+              <tr key={session.session_id}>
+                <td className="name-cell">{session.name}</td>
+                <td className="session-id-cell" title={session.session_id}>{session.session_id}</td>
+                <td className="note-cell" title={session.note || ""}>{session.note || "-"}</td>
+                <td className="time-col">{formatTime(session.created_at)}</td>
+                <td className="time-col">{formatTime(session.updated_at)}</td>
+                <td className="session-actions-col">
+                  <div className="session-action-buttons">
+                    <button type="button" className="compact" onClick={() => copyResumeCommand(session.session_id)}>恢复</button>
+                    <button type="button" className="compact" onClick={() => setEditing(session)}>编辑</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {items.length === 0 && <div className="empty">还没有保存的会话。</div>}
+      </div>
+      <Pager pageData={sessions} pageSize={pageSizeDraft} onPageSize={setPageSizeDraft} onPrev={prevPage} onNext={nextPage} />
+      {editing && (
+        <div className="modal-backdrop" onClick={() => setEditing(null)}>
+          <form className="modal session-modal" role="dialog" aria-modal="true" aria-labelledby="session-modal-title" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <h3 id="session-modal-title">{draft.session_id ? "编辑会话" : "新建会话"}</h3>
+              <button className="modal-close" type="button" aria-label="关闭" onClick={() => setEditing(null)}>×</button>
+            </div>
+            <label className="field">
+              <span>会话 ID</span>
+              <input
+                value={draft.session_id}
+                onChange={(event) => setEditing((prev) => ({ ...prev, session_id: event.target.value }))}
+                disabled={Boolean(draft.created_at)}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>会话名称</span>
+              <input
+                value={draft.name}
+                onChange={(event) => setEditing((prev) => ({ ...prev, name: event.target.value }))}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>备注</span>
+              <textarea
+                rows="4"
+                value={draft.note || ""}
+                onChange={(event) => setEditing((prev) => ({ ...prev, note: event.target.value }))}
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setEditing(null)}>取消</button>
+              <button type="submit" className="primary">保存</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CallRecordsPage({ pageData, summary, accounts, settings, onSaveSession, onMessage, onQuery }) {
   const { query, pageSizeDraft, setField, search, runWithPatch, setPageSizeDraft, nextPage, prevPage } = usePagedQuery(onQuery, pageData);
   const pageTotals = sumCallRecords(pageData.items);
   const billingFactors = billingFactorsFromSettings(settings);
+  const [rowMenu, setRowMenu] = useState(null);
+  const [sessionDraft, setSessionDraft] = useState(null);
+  useEffect(() => {
+    if (!rowMenu) return undefined;
+    const close = () => setRowMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [rowMenu]);
   async function copyValue(value) {
     const text = String(value || "").trim();
     if (!text) return;
@@ -735,6 +907,32 @@ function CallRecordsPage({ pageData, summary, accounts, settings, onMessage, onQ
   async function toggleAccountFilter(accountId) {
     if (!accountId) return;
     await runWithPatch({ accountId: query.accountId === accountId ? "" : accountId }, 1);
+  }
+  async function saveSessionFromLog(log) {
+    const sessionId = String(log.session_id || "").trim();
+    if (!sessionId) {
+      onMessage("这条调用记录没有会话 ID");
+      return;
+    }
+    setSessionDraft({ session_id: sessionId, name: "", note: "" });
+  }
+  async function submitSessionDraft(event) {
+    event.preventDefault();
+    try {
+      await onSaveSession(sessionDraft);
+      setSessionDraft(null);
+    } catch (error) {
+      onMessage(`保存会话失败：${error.message}`);
+    }
+  }
+  function openRowMenu(event, log) {
+    event.preventDefault();
+    event.stopPropagation();
+    setRowMenu({
+      log,
+      x: event.clientX,
+      y: event.clientY
+    });
   }
   return (
     <section className="panel">
@@ -774,7 +972,11 @@ function CallRecordsPage({ pageData, summary, accounts, settings, onMessage, onQ
           <thead><tr><th className="time-col">时间</th><th className="account-col">账号</th><th>会话 ID</th><th>客户端路径</th><th className="call-status-col">状态</th><th>耗时</th><th>输入(未命中)</th><th className="output-col">输出</th><th>总计</th><th>计费系数</th></tr></thead>
           <tbody>
             {pageData.items.map((log) => (
-              <tr key={log.id}>
+              <tr
+                key={log.id}
+                onContextMenu={(event) => openRowMenu(event, log)}
+                title={log.session_id ? "右键保存会话" : ""}
+              >
                 <td className="time-col">{formatTime(log.created_at)}</td>
                 <td className="account-col">
                   <button
@@ -827,7 +1029,59 @@ function CallRecordsPage({ pageData, summary, accounts, settings, onMessage, onQ
             </tfoot>
           )}
         </table>
+        {rowMenu && (
+          <div
+            className="context-menu"
+            style={{ left: rowMenu.x, top: rowMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                const log = rowMenu.log;
+                setRowMenu(null);
+                saveSessionFromLog(log);
+              }}
+            >
+              保存会话
+            </button>
+          </div>
+        )}
       </div>
+      {sessionDraft && (
+        <div className="modal-backdrop" onClick={() => setSessionDraft(null)}>
+          <form className="modal session-modal" role="dialog" aria-modal="true" aria-labelledby="call-session-modal-title" onSubmit={submitSessionDraft} onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <h3 id="call-session-modal-title">保存会话</h3>
+              <button className="modal-close" type="button" aria-label="关闭" onClick={() => setSessionDraft(null)}>×</button>
+            </div>
+            <label className="field">
+              <span>会话 ID</span>
+              <input value={sessionDraft.session_id} disabled />
+            </label>
+            <label className="field">
+              <span>会话名称</span>
+              <input
+                value={sessionDraft.name}
+                onChange={(event) => setSessionDraft((prev) => ({ ...prev, name: event.target.value }))}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>备注</span>
+              <textarea
+                rows="4"
+                value={sessionDraft.note}
+                onChange={(event) => setSessionDraft((prev) => ({ ...prev, note: event.target.value }))}
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setSessionDraft(null)}>取消</button>
+              <button type="submit" className="primary">保存</button>
+            </div>
+          </form>
+        </div>
+      )}
       <Pager pageData={pageData} pageSize={pageSizeDraft} onPageSize={setPageSizeDraft} onPrev={prevPage} onNext={nextPage} />
     </section>
   );

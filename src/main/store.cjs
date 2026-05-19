@@ -26,6 +26,8 @@ function createStore() {
     saveLoginSession: (session) => saveLoginSession(db, session),
     getLoginSession: (id) => db.prepare("SELECT * FROM login_sessions WHERE id = ?").get(id),
     updateLoginSession: (id, status, error) => updateLoginSession(db, id, status, error),
+    listCodexSessions: (query) => listCodexSessions(db, query),
+    saveCodexSession: (session) => saveCodexSession(db, session),
     listTokenLogs: (query) => listTokenLogs(db, query),
     addTokenLog: (entry) => addTokenLog(db, entry),
     clearTokenLogs: () => clearTokenLogs(db),
@@ -94,6 +96,13 @@ function migrate(db) {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS codex_sessions (
+      session_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      note TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS app_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       level TEXT NOT NULL DEFAULT 'info',
@@ -116,6 +125,7 @@ function migrate(db) {
   addColumnIfMissing(db, "request_logs", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "request_logs", "reasoning_output_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "request_logs", "total_tokens", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "codex_sessions", "note", "TEXT");
   const defaults = {
     gateway_host: "localhost",
     gateway_port: "8436",
@@ -285,6 +295,57 @@ function updateLoginSession(db, id, status, error) {
   db.prepare(`
     UPDATE login_sessions SET status = ?, error = ?, updated_at = ? WHERE id = ?
   `).run(status, error || null, now(), id);
+}
+
+function listCodexSessions(db, query = {}) {
+  const name = cleanSessionName(query.name);
+  const page = clampInt(query.page, 1, 1, 100000);
+  const pageSize = clampInt(query.pageSize, 10, 5, 200);
+  const offset = (page - 1) * pageSize;
+  const clauses = [];
+  const params = [];
+  if (name) {
+    clauses.push("name LIKE ?");
+    params.push(`%${name}%`);
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  const items = db.prepare(`
+    SELECT * FROM codex_sessions
+    ${where}
+    ORDER BY updated_at DESC, created_at DESC, session_id ASC
+    LIMIT ? OFFSET ?
+  `).all(...params, pageSize, offset);
+  const total = db.prepare(`
+    SELECT COUNT(*) AS total
+    FROM codex_sessions
+    ${where}
+  `).get(...params).total;
+  return { items, total, page, pageSize, name };
+}
+
+function saveCodexSession(db, input) {
+  const sessionId = cleanFilterValue(input?.session_id);
+  const name = cleanSessionName(input?.name);
+  const note = cleanSessionNote(input?.note);
+  if (!sessionId) throw new Error("会话 ID 不能为空。");
+  if (!name) throw new Error("会话名称不能为空。");
+  const existing = db.prepare("SELECT created_at FROM codex_sessions WHERE session_id = ?").get(sessionId);
+  const ts = now();
+  db.prepare(`
+    INSERT INTO codex_sessions (session_id, name, note, created_at, updated_at)
+    VALUES (@session_id, @name, @note, @created_at, @updated_at)
+    ON CONFLICT(session_id) DO UPDATE SET
+      name = excluded.name,
+      note = excluded.note,
+      updated_at = excluded.updated_at
+  `).run({
+    session_id: sessionId,
+    name,
+    note,
+    created_at: existing?.created_at || ts,
+    updated_at: ts
+  });
+  return db.prepare("SELECT * FROM codex_sessions WHERE session_id = ?").get(sessionId);
 }
 
 function addTokenLog(db, entry) {
@@ -463,6 +524,16 @@ function normalizeLogQuery(query = {}) {
 function cleanFilterValue(value) {
   const text = String(value || "").trim();
   return text ? text.slice(0, 240) : "";
+}
+
+function cleanSessionName(value) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, 120) : "";
+}
+
+function cleanSessionNote(value) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, 1000) : null;
 }
 
 function clampInt(value, fallback, min, max) {
