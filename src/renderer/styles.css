@@ -1016,8 +1016,8 @@ td {
 }
 
 .session-actions-col {
-  width: 118px;
-  max-width: 118px;
+  width: 168px;
+  max-width: 168px;
   white-space: nowrap;
 }
 
@@ -1036,7 +1036,7 @@ td {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600;
+  font-weight: 400;
   color: #17202a;
 }
 

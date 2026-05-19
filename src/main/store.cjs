@@ -28,6 +28,7 @@ function createStore() {
     updateLoginSession: (id, status, error) => updateLoginSession(db, id, status, error),
     listCodexSessions: (query) => listCodexSessions(db, query),
     saveCodexSession: (session) => saveCodexSession(db, session),
+    deleteCodexSession: (sessionId) => deleteCodexSession(db, sessionId),
     listTokenLogs: (query) => listTokenLogs(db, query),
     addTokenLog: (entry) => addTokenLog(db, entry),
     clearTokenLogs: () => clearTokenLogs(db),
@@ -346,6 +347,13 @@ function saveCodexSession(db, input) {
     updated_at: ts
   });
   return db.prepare("SELECT * FROM codex_sessions WHERE session_id = ?").get(sessionId);
+}
+
+function deleteCodexSession(db, sessionId) {
+  const id = cleanFilterValue(sessionId);
+  if (!id) throw new Error("会话 ID 不能为空。");
+  const result = db.prepare("DELETE FROM codex_sessions WHERE session_id = ?").run(id);
+  return { deleted: Number(result.changes || 0) };
 }
 
 function addTokenLog(db, entry) {

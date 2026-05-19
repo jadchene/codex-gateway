@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("codexGateway", {
   importLocalCodexAccount: () => ipcRenderer.invoke("accounts:importLocalCodex"),
   listCodexSessions: (query) => ipcRenderer.invoke("sessions:list", query),
   saveCodexSession: (session) => ipcRenderer.invoke("sessions:save", session),
+  deleteCodexSession: (sessionId) => ipcRenderer.invoke("sessions:delete", sessionId),
   listTokenLogs: (query) => ipcRenderer.invoke("tokens:list", query),
   tokenSummary: (query) => ipcRenderer.invoke("tokens:summary", query),
   quotaSummary: () => ipcRenderer.invoke("quota:summary"),

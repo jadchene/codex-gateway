@@ -231,6 +231,14 @@ function App() {
     setCodexSessions(await api.listCodexSessions(query));
   }
 
+  async function deleteCodexSession(session) {
+    if (!window.confirm(`确定要删除会话“${session.name}”吗？`)) return;
+    await api.deleteCodexSession(session.session_id);
+    const nextQuery = { ...sessionQuery };
+    setCodexSessions(await api.listCodexSessions(nextQuery));
+    setMessage(`已删除会话：${session.name}`);
+  }
+
   async function setAccountEnabled(account, enabled) {
     await api.setAccountEnabled(account.id, enabled);
     await reload();
@@ -343,6 +351,7 @@ function App() {
             query={sessionQuery}
             onQuery={queryCodexSessions}
             onSave={saveCodexSession}
+            onDelete={deleteCodexSession}
             onMessage={setMessage}
           />
         )}
@@ -744,7 +753,7 @@ function CodePreview({ title, value }) {
   );
 }
 
-function SessionsPage({ sessions, query, onQuery, onSave, onMessage }) {
+function SessionsPage({ sessions, query, onQuery, onSave, onDelete, onMessage }) {
   const [editing, setEditing] = useState(null);
   const [nameDraft, setNameDraft] = useState(query.name || "");
   const [pageSizeDraft, setPageSizeDraft] = useState(sessions.pageSize || query.pageSize || 10);
@@ -826,6 +835,7 @@ function SessionsPage({ sessions, query, onQuery, onSave, onMessage }) {
                   <div className="session-action-buttons">
                     <button type="button" className="compact" onClick={() => copyResumeCommand(session.session_id)}>恢复</button>
                     <button type="button" className="compact" onClick={() => setEditing(session)}>编辑</button>
+                    <button type="button" className="compact danger ghost" onClick={() => onDelete(session)}>删除</button>
                   </div>
                 </td>
               </tr>
