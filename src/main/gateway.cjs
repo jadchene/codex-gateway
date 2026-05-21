@@ -101,7 +101,7 @@ async function handleRequest(req, res, store, authService, hooks) {
         method: req.method,
         request_path: request.originalPath,
         upstream_path: pathFromUrl(request.upstreamUrl),
-        session_id: headerValue(req.headers.session_id),
+        session_id: sessionHeaderValue(req.headers),
         version: headerValue(req.headers.version),
         status: response.status,
         duration_ms: Date.now() - started,
@@ -118,7 +118,7 @@ async function handleRequest(req, res, store, authService, hooks) {
         method: req.method,
         request_path: request.originalPath,
         upstream_path: pathFromUrl(request.upstreamUrl),
-        session_id: headerValue(req.headers.session_id),
+        session_id: sessionHeaderValue(req.headers),
         version: headerValue(req.headers.version),
         status: response.status,
         duration_ms: Date.now() - started,
@@ -136,7 +136,7 @@ async function handleRequest(req, res, store, authService, hooks) {
         method: req.method,
         request_path: request.originalPath,
         upstream_path: pathFromUrl(request.upstreamUrl),
-        session_id: headerValue(req.headers.session_id),
+        session_id: sessionHeaderValue(req.headers),
         version: headerValue(req.headers.version),
         status: 502,
         duration_ms: Date.now() - started,
@@ -212,6 +212,10 @@ function matchGatewayRoute(method, pathname) {
 function headerValue(value) {
   if (Array.isArray(value)) return value[0] || "";
   return value ? String(value) : "";
+}
+
+function sessionHeaderValue(headers) {
+  return headerValue(headers?.session_id) || headerValue(headers?.["session-id"]);
 }
 
 async function callWithFailover(req, request, firstAccount, settings, store, hooks) {
