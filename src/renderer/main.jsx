@@ -425,15 +425,11 @@ function Dashboard({ accounts, gateway, tokenSummary, quotaSummary, settings }) 
 
 function isUsableAccount(account) {
   if (!account) return false;
-  if (!account.enabled || account.status !== "active" || !account.access_token) return false;
-  if (isSubscriptionExpired(account)) return false;
+  if (!account.enabled || account.status === "disabled" || !account.access_token) return false;
   return ![account.quota_5h_used_percent, account.quota_7d_used_percent]
-    .some((value) => Number(value || 0) >= 100);
-}
-
-function isSubscriptionExpired(account) {
-  const expiresAt = Number(account.subscription_expires_at || 0);
-  return expiresAt > 0 && expiresAt <= Math.floor(Date.now() / 1000);
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .some((value) => value >= 99.9);
 }
 
 function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin, onImportLocal, onCancelLogin, onRefreshUsage, onRefreshAll, onSetEnabled, onDelete }) {
