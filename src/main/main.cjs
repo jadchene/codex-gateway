@@ -765,8 +765,8 @@ async function refreshUsage(id) {
   let account = store.listAccounts().find((item) => item.id === id);
   if (!account) throw new Error("Account not found.");
   const endpoints = [
-    "https://chatgpt.com/backend-api/wham/usage",
-    "https://chatgpt.com/backend-api/codex/usage"
+    "https://chatgpt.com/backend-api/wham/usage"
+    // "https://chatgpt.com/backend-api/codex/usage" currently returns 403 HTML for account tokens.
   ];
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -936,7 +936,7 @@ async function requestUsage(endpoint, account) {
       authorization: `Bearer ${account.access_token}`,
       "ChatGPT-Account-Id": account.account_id || account.workspace_id || "",
       accept: "application/json",
-      "user-agent": "codex_cli_rs/0.1.0",
+      "user-agent": "codex_cli_rs/0.136.0",
       origin: "https://chatgpt.com",
       referer: "https://chatgpt.com/"
     }

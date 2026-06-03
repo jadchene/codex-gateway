@@ -53,3 +53,24 @@ test("normalizeUsagePayload rounds both quota windows at 99 percent", () => {
   assert.equal(usage.quota_5h_used_percent, 100);
   assert.equal(usage.quota_7d_used_percent, 100);
 });
+
+test("normalizeUsagePayload ignores empty quota windows instead of writing zero", () => {
+  const usage = normalizeUsagePayload({
+    user_id: "user",
+    rate_limit: {
+      allowed: true,
+      limit_reached: false,
+      primary_window: {
+        used_percent: 0,
+        limit_window_seconds: 0,
+        reset_after_seconds: 0,
+        reset_at: 1780474988
+      },
+      secondary_window: null
+    }
+  });
+  assert.equal("quota_5h_used_percent" in usage, false);
+  assert.equal("quota_5h_reset_at" in usage, false);
+  assert.equal("quota_7d_used_percent" in usage, false);
+  assert.equal("quota_7d_reset_at" in usage, false);
+});

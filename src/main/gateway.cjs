@@ -305,10 +305,20 @@ function syncAccountUsageFromHeaders(account, headers, store) {
   const secondaryUsed = numberHeader(headers, "x-codex-secondary-used-percent");
   const secondaryResetAfter = numberHeader(headers, "x-codex-secondary-reset-after-seconds");
 
-  if (Number.isFinite(primaryUsed)) usage.quota_5h_used_percent = clampPercent(primaryUsed);
-  if (Number.isFinite(primaryResetAfter)) usage.quota_5h_reset_at = nowSeconds + Math.max(0, Math.trunc(primaryResetAfter));
-  if (Number.isFinite(secondaryUsed)) usage.quota_7d_used_percent = clampPercent(secondaryUsed);
-  if (Number.isFinite(secondaryResetAfter)) usage.quota_7d_reset_at = nowSeconds + Math.max(0, Math.trunc(secondaryResetAfter));
+  applyQuotaHeaderWindow(usage, account, {
+    used: primaryUsed,
+    resetAfter: primaryResetAfter,
+    usedField: "quota_5h_used_percent",
+    resetField: "quota_5h_reset_at",
+    nowSeconds
+  });
+  applyQuotaHeaderWindow(usage, account, {
+    used: secondaryUsed,
+    resetAfter: secondaryResetAfter,
+    usedField: "quota_7d_used_percent",
+    resetField: "quota_7d_reset_at",
+    nowSeconds
+  });
   if (Object.keys(usage).length > 0) {
     usage.raw_usage_json = JSON.stringify({
       source: "gateway-response-headers",
@@ -324,6 +334,24 @@ function syncAccountUsageFromHeaders(account, headers, store) {
     return true;
   }
   return false;
+}
+
+function applyQuotaHeaderWindow(usage, account, options) {
+  const { used, resetAfter, usedField, resetField, nowSeconds } = options;
+  const hasUsed = Number.isFinite(used);
+  const hasReset = Number.isFinite(resetAfter);
+  const resetSeconds = hasReset ? Math.max(0, Math.trunc(resetAfter)) : null;
+  const existingUsed = Number(account?.[usedField]);
+  const existingResetAt = Number(account?.[resetField]);
+  const hasExistingPositiveUsage = Number.isFinite(existingUsed) && existingUsed > 0;
+  const hasExistingFutureReset = Number.isFinite(existingResetAt) && existingResetAt > nowSeconds;
+  const isAmbiguousZero = hasUsed
+    && clampPercent(used) === 0
+    && (!hasReset || resetSeconds === 0)
+    && (hasExistingPositiveUsage || hasExistingFutureReset);
+
+  if (hasUsed && !isAmbiguousZero) usage[usedField] = clampPercent(used);
+  if (hasReset && resetSeconds > 0) usage[resetField] = nowSeconds + resetSeconds;
 }
 
 function numberHeader(headers, name) {

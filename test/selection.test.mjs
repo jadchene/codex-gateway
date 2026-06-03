@@ -317,6 +317,49 @@ test("syncAccountUsageFromHeaders stores quota snapshots for the active account"
   assert.ok(updated.usage.quota_7d_reset_at > updated.usage.quota_5h_reset_at);
 });
 
+test("syncAccountUsageFromHeaders ignores ambiguous zero quota headers", () => {
+  let updated = null;
+  syncAccountUsageFromHeaders(
+    {
+      id: "active",
+      quota_5h_used_percent: 42,
+      quota_5h_reset_at: Math.floor(Date.now() / 1000) + 1000,
+      quota_7d_used_percent: 85,
+      quota_7d_reset_at: Math.floor(Date.now() / 1000) + 1000
+    },
+    new Headers({
+      "x-codex-primary-used-percent": "0",
+      "x-codex-primary-reset-after-seconds": "0",
+      "x-codex-secondary-used-percent": "0",
+      "x-codex-secondary-reset-after-seconds": "0"
+    }),
+    {
+      updateUsage(id, usage) {
+        updated = { id, usage };
+      }
+    }
+  );
+  assert.equal(updated, null);
+});
+
+test("syncAccountUsageFromHeaders accepts zero quota headers with a reset window", () => {
+  let updated = null;
+  syncAccountUsageFromHeaders(
+    { id: "active", quota_5h_used_percent: 42 },
+    new Headers({
+      "x-codex-primary-used-percent": "0",
+      "x-codex-primary-reset-after-seconds": "18000"
+    }),
+    {
+      updateUsage(id, usage) {
+        updated = { id, usage };
+      }
+    }
+  );
+  assert.equal(updated.usage.quota_5h_used_percent, 0);
+  assert.ok(updated.usage.quota_5h_reset_at > Math.floor(Date.now() / 1000));
+});
+
 test("callWithFailover stores quota headers and switches current account after exhaustion", async () => {
   const originalFetch = globalThis.fetch;
   const accounts = [

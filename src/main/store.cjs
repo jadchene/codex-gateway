@@ -243,6 +243,16 @@ function normalizeAccount(input) {
 }
 
 function updateUsage(db, id, usage) {
+  const params = {
+    quota_5h_used_percent: null,
+    quota_5h_reset_at: null,
+    quota_7d_used_percent: null,
+    quota_7d_reset_at: null,
+    raw_usage_json: null,
+    ...usage,
+    id,
+    updated_at: now()
+  };
   db.prepare(`
     UPDATE accounts SET
       quota_5h_used_percent = COALESCE(@quota_5h_used_percent, quota_5h_used_percent),
@@ -252,7 +262,7 @@ function updateUsage(db, id, usage) {
       raw_usage_json = COALESCE(@raw_usage_json, raw_usage_json),
       updated_at = @updated_at
     WHERE id = @id
-  `).run({ id, updated_at: now(), ...usage });
+  `).run(params);
 }
 
 function setAccountEnabled(db, id, enabled) {
