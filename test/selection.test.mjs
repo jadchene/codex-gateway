@@ -585,6 +585,12 @@ test("gatewayProviderBlock uses OpenAI provider name for compact support", () =>
   assert.match(block, /wire_api = "responses"/);
 });
 
+test("gatewayProviderBlock writes localhost base URL for wildcard listener", () => {
+  const block = gatewayProviderBlock({ gateway_host: "0.0.0.0", gateway_port: "8436" });
+  assert.match(block, /base_url = "http:\/\/localhost:8436\/v1"/);
+  assert.doesNotMatch(block, /base_url = "http:\/\/0\.0\.0\.0:8436\/v1"/);
+});
+
 test("replaceGatewayProviderBlock repairs existing provider name", () => {
   const current = [
     'model = "gpt-5.4"',

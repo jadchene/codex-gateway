@@ -1375,7 +1375,7 @@ function normalizeAuthMode(value) {
 }
 
 function providerToml(settings) {
-  const host = settings.gateway_host || "localhost";
+  const host = gatewayProviderBaseHost(settings.gateway_host);
   const port = settings.gateway_port || "8436";
   return [
     'model_provider = "codex_gateway"',
@@ -1385,6 +1385,12 @@ function providerToml(settings) {
     `base_url = "http://${host}:${port}/v1"`,
     'wire_api = "responses"'
   ].join("\n");
+}
+
+function gatewayProviderBaseHost(host) {
+  const value = String(host || "").trim();
+  if (!value || value === "0.0.0.0") return "localhost";
+  return value;
 }
 
 function todayQuery(pageSize = 10) {
