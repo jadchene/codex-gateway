@@ -136,6 +136,12 @@ function migrate(db) {
     usage_refresh_interval_secs: "900",
     last_usage_refresh_all_at: "0",
     auto_start_gateway: "false",
+    auto_start_mcp_gateway: "false",
+    mcp_gateway_config_path: "",
+    mcp_gateway_host: "127.0.0.1",
+    mcp_gateway_port: "3000",
+    mcp_gateway_path: "/mcp",
+    mcp_gateway_json_response: "",
     startup_launch: "disabled",
     close_behavior: "exit",
     codex_quota_headers_mode: "block",
@@ -149,6 +155,9 @@ function migrate(db) {
   };
   const insert = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
   for (const [key, value] of Object.entries(defaults)) insert.run(key, value);
+  fillBlankSetting(db, "mcp_gateway_host", "127.0.0.1");
+  fillBlankSetting(db, "mcp_gateway_port", "3000");
+  fillBlankSetting(db, "mcp_gateway_path", "/mcp");
 }
 
 function getSettings(db) {
@@ -286,6 +295,10 @@ function dropColumnIfExists(db, table, column) {
   } catch {
     // Older SQLite builds may not support DROP COLUMN. The application no longer reads or writes this field.
   }
+}
+
+function fillBlankSetting(db, key, value) {
+  db.prepare("UPDATE settings SET value = ? WHERE key = ? AND TRIM(value) = ''").run(value, key);
 }
 
 function saveLoginSession(db, session) {

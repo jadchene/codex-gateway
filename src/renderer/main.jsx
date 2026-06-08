@@ -27,6 +27,7 @@ function App() {
   const [quotaSummary, setQuotaSummary] = useState({ primary: {}, secondary: {} });
   const [appLogs, setAppLogs] = useState({ items: [], total: 0, page: 1, pageSize: 10 });
   const [gateway, setGateway] = useState({ running: false, url: "" });
+  const [mcpGateway, setMcpGateway] = useState({ running: false, url: "", command: "" });
   const [paths, setPaths] = useState({});
   const [message, setMessage] = useState("");
   const [loginId, setLoginId] = useState("");
@@ -46,6 +47,7 @@ function App() {
     setQuotaSummary(data.quotaSummary || { primary: {}, secondary: {} });
     setAppLogs(data.appLogs);
     setGateway(data.gateway);
+    setMcpGateway(data.mcpGateway || { running: false, url: "", command: "" });
     setPaths(data.paths);
     setReady(true);
   }
@@ -66,6 +68,13 @@ function App() {
     if (!api.onGatewayStatusChanged) return undefined;
     return api.onGatewayStatusChanged((status) => {
       setGateway(status);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!api.onMcpGatewayStatusChanged) return undefined;
+    return api.onMcpGatewayStatusChanged((status) => {
+      setMcpGateway(status);
     });
   }, []);
 
@@ -143,6 +152,7 @@ function App() {
 
   const activeAccounts = useMemo(() => accounts.filter((item) => item.enabled && item.status === "active"), [accounts]);
   const gatewayBase = `${gateway.url || `http://${settings.gateway_host || "localhost"}:${settings.gateway_port || "8436"}`}/v1`;
+  const mcpGatewayUrl = mcpGateway.url || mcpGatewayBaseUrl(settings);
 
   async function saveSettings(next) {
     setSettings(await api.saveSettings(next));
@@ -217,6 +227,12 @@ function App() {
     const next = gateway.running ? await api.stopGateway() : await api.startGateway();
     setGateway(next);
     setMessage(next.running ? "网关已启动" : "网关已停止");
+  }
+
+  async function toggleMcpGateway() {
+    const next = mcpGateway.running ? await api.stopMcpGateway() : await api.startMcpGateway();
+    setMcpGateway(next);
+    setMessage(next.running ? "MCP 网关已启动" : "MCP 网关已停止");
   }
 
   async function saveCodexSession(session) {
@@ -303,7 +319,7 @@ function App() {
       <section className="content">
         {message && <div className="toast" role="status">{message}</div>}
 
-        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} tokenSummary={dashboardSummary} quotaSummary={quotaSummary} settings={settings} />}
+        {page === "dashboard" && <Dashboard accounts={accounts} gateway={gateway} mcpGateway={mcpGateway} tokenSummary={dashboardSummary} quotaSummary={quotaSummary} settings={settings} />}
         {page === "accounts" && (
           <AccountsPage
             accounts={accounts}
@@ -344,7 +360,18 @@ function App() {
             }}
           />
         )}
-        {page === "gateway" && <GatewayPage gateway={gateway} gatewayBase={gatewayBase} settings={settings} onToggle={toggleGateway} onMessage={setMessage} />}
+        {page === "gateway" && (
+          <GatewayPage
+            gateway={gateway}
+            mcpGateway={mcpGateway}
+            gatewayBase={gatewayBase}
+            mcpGatewayUrl={mcpGatewayUrl}
+            settings={settings}
+            onToggle={toggleGateway}
+            onToggleMcp={toggleMcpGateway}
+            onMessage={setMessage}
+          />
+        )}
         {page === "sessions" && (
           <SessionsPage
             sessions={codexSessions}
@@ -391,7 +418,7 @@ function App() {
   );
 }
 
-function Dashboard({ accounts, gateway, tokenSummary, quotaSummary, settings }) {
+function Dashboard({ accounts, gateway, mcpGateway, tokenSummary, quotaSummary, settings }) {
   const usable = accounts.filter(isUsableAccount).length;
   const total = tokenSummary?.total || {};
   const billingFactors = billingFactorsFromSettings(settings);
@@ -405,7 +432,8 @@ function Dashboard({ accounts, gateway, tokenSummary, quotaSummary, settings }) 
       </div>
       <div className="dashboard-grid">
         <Metric title="可用账号" value={`${usable}/${accounts.length}`} />
-        <Metric title="网关状态" value={gateway.running ? "运行中" : "未启动"} />
+        <Metric title="Codex 网关" value={gateway.running ? "运行中" : "未启动"} />
+        <Metric title="MCP 网关" value={mcpGateway.running ? "运行中" : "未启动"} />
       </div>
       <div className="dashboard-grid quota-metric-grid">
         <QuotaMetric title="5 小时剩余额度" detail={quotaSummary?.primary} />
@@ -596,7 +624,7 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
   );
 }
 
-function GatewayPage({ gateway, gatewayBase, settings, onToggle, onMessage }) {
+function GatewayPage({ gateway, mcpGateway, gatewayBase, mcpGatewayUrl, settings, onToggle, onToggleMcp, onMessage }) {
   async function copy(value) {
     try {
       await navigator.clipboard.writeText(value || "");
@@ -609,17 +637,44 @@ function GatewayPage({ gateway, gatewayBase, settings, onToggle, onMessage }) {
   return (
     <section className="panel form-panel">
       <h2>网关服务</h2>
-      <div className="gateway-status">
-        <span className={gateway.running ? "status-dot on" : "status-dot"} />
-        <strong>{gateway.running ? "运行中" : "已停止"}</strong>
-      </div>
-      <div>
-        <button className={gateway.running ? "danger" : "primary"} onClick={onToggle}>{gateway.running ? "停止网关" : "启动网关"}</button>
-      </div>
-      <div className="info-box">
-        <InfoRow label="Base URL" value={gatewayBase} onCopy={() => copy(gatewayBase)} />
-        <InfoRow label="API Key" value={settings.gateway_api_key} onCopy={() => copy(settings.gateway_api_key)} />
-        <InfoRow label="上游地址" value={settings.upstream_base_url} />
+      <div className="gateway-service-grid">
+        <section className="gateway-box">
+          <div className="gateway-service-head">
+            <div>
+              <h3>Codex 网关</h3>
+            </div>
+            <div className="gateway-head-actions">
+              <div className="gateway-status">
+                <span className={gateway.running ? "status-dot on" : "status-dot"} />
+                <strong>{gateway.running ? "运行中" : "已停止"}</strong>
+              </div>
+              <button className={gateway.running ? "danger compact" : "primary compact"} onClick={onToggle}>{gateway.running ? "停止" : "启动"}</button>
+            </div>
+          </div>
+          <div className="info-box">
+            <InfoRow label="Base URL" value={gatewayBase} onCopy={() => copy(gatewayBase)} />
+            <InfoRow label="API Key" value={settings.gateway_api_key} onCopy={() => copy(settings.gateway_api_key)} />
+            <InfoRow label="上游地址" value={settings.upstream_base_url} />
+          </div>
+        </section>
+        <section className="gateway-box">
+          <div className="gateway-service-head">
+            <div>
+              <h3>MCP 网关</h3>
+            </div>
+            <div className="gateway-head-actions">
+              <div className="gateway-status">
+                <span className={mcpGateway.running ? "status-dot on" : "status-dot"} />
+                <strong>{mcpGateway.running ? "运行中" : "已停止"}</strong>
+              </div>
+              <button className={mcpGateway.running ? "danger compact" : "primary compact"} onClick={onToggleMcp}>{mcpGateway.running ? "停止" : "启动"}</button>
+            </div>
+          </div>
+          <div className="info-box">
+            <InfoRow label="地址" value={mcpGatewayUrl || "-"} />
+            <InfoRow label="命令" value={mcpGateway.command || mcpGatewayCommand(settings)} />
+          </div>
+        </section>
       </div>
     </section>
   );
@@ -700,6 +755,27 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
         <div className="segmented">
           <button type="button" className={draft.auto_start_gateway === "true" ? "active" : ""} onClick={() => setField("auto_start_gateway", "true")}>开启</button>
           <button type="button" className={draft.auto_start_gateway !== "true" ? "active" : ""} onClick={() => setField("auto_start_gateway", "false")}>关闭</button>
+        </div>
+      </div>
+      <div className="divider-title">MCP 网关</div>
+      <div className="field">
+        <span>自动启动</span>
+        <div className="segmented">
+          <button type="button" className={draft.auto_start_mcp_gateway === "true" ? "active" : ""} onClick={() => setField("auto_start_mcp_gateway", "true")}>开启</button>
+          <button type="button" className={draft.auto_start_mcp_gateway !== "true" ? "active" : ""} onClick={() => setField("auto_start_mcp_gateway", "false")}>关闭</button>
+        </div>
+      </div>
+      <ControlledField name="mcp_gateway_config_path" label="配置路径" value={draft.mcp_gateway_config_path} onChange={setField} />
+      <div className="split split-three">
+        <ControlledField name="mcp_gateway_host" label="主机" value={draft.mcp_gateway_host} onChange={setField} />
+        <ControlledField name="mcp_gateway_port" label="端口" value={draft.mcp_gateway_port} type="number" onChange={setField} />
+        <ControlledField name="mcp_gateway_path" label="路径" value={draft.mcp_gateway_path} onChange={setField} />
+      </div>
+      <div className="field">
+        <span>JSON Response</span>
+        <div className="segmented">
+          <button type="button" className={draft.mcp_gateway_json_response === "true" ? "active" : ""} onClick={() => setField("mcp_gateway_json_response", "true")}>启用</button>
+          <button type="button" className={draft.mcp_gateway_json_response !== "true" ? "active" : ""} onClick={() => setField("mcp_gateway_json_response", "")}>禁用</button>
         </div>
       </div>
       <div className="field">
@@ -1391,6 +1467,51 @@ function gatewayProviderBaseHost(host) {
   const value = String(host || "").trim();
   if (!value || value === "0.0.0.0") return "localhost";
   return value;
+}
+
+function mcpGatewayBaseUrl(settings = {}) {
+  const host = cleanMcpGatewayText(settings.mcp_gateway_host);
+  const port = cleanMcpGatewayPort(settings.mcp_gateway_port);
+  if (!host || !port) return "";
+  return `http://${host}:${port}${cleanMcpGatewayPath(settings.mcp_gateway_path)}`;
+}
+
+function mcpGatewayCommand(settings = {}) {
+  const args = ["mcp-gateway-service", "--http"];
+  appendOptionalMcpArg(args, "--config", settings.mcp_gateway_config_path);
+  appendOptionalMcpArg(args, "--host", settings.mcp_gateway_host);
+  appendOptionalMcpArg(args, "--port", cleanMcpGatewayPort(settings.mcp_gateway_port));
+  appendOptionalMcpArg(args, "--path", cleanMcpGatewayPath(settings.mcp_gateway_path));
+  if (settings.mcp_gateway_json_response === "true") args.push("--json-response");
+  return args.map(quoteCommandArg).join(" ");
+}
+
+function appendOptionalMcpArg(args, name, value) {
+  const text = cleanMcpGatewayText(value);
+  if (!text) return;
+  args.push(name, text);
+}
+
+function cleanMcpGatewayText(value) {
+  return String(value || "").trim();
+}
+
+function cleanMcpGatewayPort(value) {
+  const text = cleanMcpGatewayText(value);
+  if (!text) return "";
+  const number = Number(text);
+  return Number.isFinite(number) && number > 0 ? String(Math.trunc(number)) : "";
+}
+
+function cleanMcpGatewayPath(value) {
+  const text = cleanMcpGatewayText(value);
+  if (!text) return "";
+  return text.startsWith("/") ? text : `/${text}`;
+}
+
+function quoteCommandArg(value) {
+  const text = String(value);
+  return /[\s"]/g.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
 }
 
 function todayQuery(pageSize = 10) {

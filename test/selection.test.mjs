@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const { pickGatewayAccount, quotaWindowExhausted, resetSelectionState, usageScore } = require("../src/main/selection.cjs");
 const { buildAuthorizeUrl } = require("../src/main/auth.cjs");
 const { gatewayProviderBlock, insertProviderBlockIntoConfig, replaceGatewayProviderBlock } = require("../src/main/codex-cli-auth.cjs");
+const { buildMcpGatewayCommand, mcpGatewayPath, mcpGatewayUrl } = require("../src/main/mcp-gateway-service.cjs");
 const {
   buildCodexQuotaHeaders,
   buildGatewayRequest,
@@ -589,6 +590,30 @@ test("gatewayProviderBlock writes localhost base URL for wildcard listener", () 
   const block = gatewayProviderBlock({ gateway_host: "0.0.0.0", gateway_port: "8436" });
   assert.match(block, /base_url = "http:\/\/localhost:8436\/v1"/);
   assert.doesNotMatch(block, /base_url = "http:\/\/0\.0\.0\.0:8436\/v1"/);
+});
+
+test("mcp gateway command omits optional HTTP arguments by default", () => {
+  assert.equal(mcpGatewayUrl({}), "");
+  assert.equal(buildMcpGatewayCommand({}), "mcp-gateway-service --http");
+});
+
+test("mcp gateway path is normalized with leading slash", () => {
+  assert.equal(mcpGatewayPath({ mcp_gateway_path: "mcp" }), "/mcp");
+  assert.equal(
+    mcpGatewayUrl({ mcp_gateway_host: "0.0.0.0", mcp_gateway_port: "3100", mcp_gateway_path: "mcp" }),
+    "http://0.0.0.0:3100/mcp"
+  );
+});
+
+test("mcp gateway command includes only filled optional arguments", () => {
+  assert.equal(
+    buildMcpGatewayCommand({
+      mcp_gateway_config_path: "./config.json",
+      mcp_gateway_port: "3100",
+      mcp_gateway_json_response: "true"
+    }),
+    "mcp-gateway-service --http --config ./config.json --port 3100 --json-response"
+  );
 });
 
 test("replaceGatewayProviderBlock repairs existing provider name", () => {

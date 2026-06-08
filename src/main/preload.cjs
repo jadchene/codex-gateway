@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld("codexGateway", {
   clearAppLogs: () => ipcRenderer.invoke("appLogs:clear"),
   startGateway: () => ipcRenderer.invoke("gateway:start"),
   stopGateway: () => ipcRenderer.invoke("gateway:stop"),
+  startMcpGateway: () => ipcRenderer.invoke("mcpGateway:start"),
+  stopMcpGateway: () => ipcRenderer.invoke("mcpGateway:stop"),
   applyGatewayAuth: () => ipcRenderer.invoke("codexAuth:applyGatewayMode"),
   applyAccountAuth: (accountId) => ipcRenderer.invoke("codexAuth:applyAccountMode", accountId),
   startLogin: () => ipcRenderer.invoke("auth:startLogin"),
@@ -30,6 +32,11 @@ contextBridge.exposeInMainWorld("codexGateway", {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("gateway:status-changed", listener);
     return () => ipcRenderer.removeListener("gateway:status-changed", listener);
+  },
+  onMcpGatewayStatusChanged: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("mcpGateway:status-changed", listener);
+    return () => ipcRenderer.removeListener("mcpGateway:status-changed", listener);
   },
   onDataChanged: (callback) => {
     const listener = (_event, types) => callback(types);

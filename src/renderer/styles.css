@@ -643,15 +643,53 @@ textarea {
 .info-box {
   display: grid;
   gap: 8px;
-  padding: 12px;
-  background: #f8fafc;
   border-radius: 8px;
+}
+
+.gateway-box {
+  grid-template-rows: 38px minmax(0, 1fr);
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+.info-box {
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.gateway-service-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.gateway-service-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  min-height: 38px;
+}
+
+.gateway-service-head h3 {
+  line-height: 1.2;
+}
+
+.gateway-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 132px;
+  justify-content: flex-end;
 }
 
 .gateway-status {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 72px;
+  justify-content: flex-end;
 }
 
 .status-dot {
@@ -665,9 +703,16 @@ textarea {
   background: #16a34a;
 }
 
-.gateway-box div {
+.gateway-box > div:not(.gateway-service-head),
+.info-box > div {
   display: grid;
   gap: 4px;
+}
+
+.gateway-box .gateway-service-head,
+.gateway-box .gateway-head-actions,
+.gateway-box .gateway-status {
+  display: flex;
 }
 
 .gateway-box .copy-row,
@@ -676,6 +721,13 @@ textarea {
   grid-template-columns: 90px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+}
+
+.info-row code {
+  min-width: 0;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  line-break: anywhere;
 }
 
 .info-row span {
@@ -1143,7 +1195,8 @@ tfoot td,
   .mode-grid,
   .auth-preview-grid,
   .filter-row,
-  .token-filter-row {
+  .token-filter-row,
+  .gateway-service-grid {
     grid-template-columns: 1fr;
   }
 

@@ -5,6 +5,7 @@ const path = require("node:path");
 const { browserDataDir } = require("./paths.cjs");
 const { createStore } = require("./store.cjs");
 const { createGateway, buildCodexQuotaHeaderDetail } = require("./gateway.cjs");
+const { createMcpGatewayService } = require("./mcp-gateway-service.cjs");
 const { createAuthService, accountFromTokens } = require("./auth.cjs");
 const { normalizeUsagePayload } = require("./quota.cjs");
 const { applyGatewayMode, applyAccountMode, detectCodexAuthMode } = require("./codex-cli-auth.cjs");
@@ -17,6 +18,7 @@ app.setAppUserModelId("io.github.jadchene.codex-gateway");
 let mainWindow;
 let store;
 let gateway;
+let mcpGateway;
 let authService;
 let tray;
 let creatingTray = false;
@@ -60,6 +62,7 @@ app.whenReady().then(async () => {
   syncDetectedCodexAuthMode();
   authService = createAuthService(store, () => gateway.start(), refreshUsage);
   gateway = createGateway(store, authService, { refreshAllUsage, refreshAccountToken: refreshGatewayAccountToken });
+  mcpGateway = createMcpGatewayService(store, { onStatusChanged: notifyMcpGatewayStatus });
   registerIpc();
   scheduleUsageRefresh("startup");
   const startedStartupRefreshAll = checkUsageRefreshOnStartup();
@@ -70,6 +73,14 @@ app.whenReady().then(async () => {
       updateTrayMenu();
     }).catch((error) => {
       store.addAppLog({ level: "error", scope: "gateway", action: "auto-start", status: "failed", message: error.message });
+    });
+  }
+  if (store.getSettings().auto_start_mcp_gateway === "true") {
+    mcpGateway.start().then((status) => {
+      store.addAppLog({ scope: "mcp-gateway", action: "auto-start", status: "success", message: "应用启动时自动启动 MCP 网关" });
+      notifyMcpGatewayStatus(status);
+    }).catch((error) => {
+      store.addAppLog({ level: "error", scope: "mcp-gateway", action: "auto-start", status: "failed", message: error.message });
     });
   }
   if (isStartupHiddenLaunch()) {
@@ -237,6 +248,7 @@ function registerIpc() {
     quotaSummary: gatewayQuotaSummary(),
     appLogs: store.listAppLogs(),
     gateway: gateway.status(),
+    mcpGateway: mcpGateway.status(),
     paths: store.paths
   }));
   ipcMain.handle("settings:save", (_event, patch) => {
@@ -281,6 +293,12 @@ function registerIpc() {
   });
   ipcMain.handle("gateway:stop", async () => {
     return stopGateway("manual");
+  });
+  ipcMain.handle("mcpGateway:start", async () => {
+    return startMcpGateway("manual");
+  });
+  ipcMain.handle("mcpGateway:stop", async () => {
+    return stopMcpGateway("manual");
   });
   ipcMain.handle("codexAuth:applyGatewayMode", () => {
     const settings = store.getSettings();
@@ -357,6 +375,30 @@ async function stopGateway(reason = "manual") {
   return status;
 }
 
+async function startMcpGateway(reason = "manual") {
+  const status = await mcpGateway.start();
+  store.addAppLog({
+    scope: "mcp-gateway",
+    action: "start",
+    status: "success",
+    message: reason === "manual" ? "MCP 网关已启动" : `${reason}: MCP 网关已启动`
+  });
+  notifyMcpGatewayStatus(status);
+  return status;
+}
+
+async function stopMcpGateway(reason = "manual") {
+  const status = await mcpGateway.stop();
+  store.addAppLog({
+    scope: "mcp-gateway",
+    action: "stop",
+    status: "success",
+    message: reason === "manual" ? "MCP 网关已停止" : `${reason}: MCP 网关已停止`
+  });
+  notifyMcpGatewayStatus(status);
+  return status;
+}
+
 async function importLocalCodexAccount() {
   const file = path.join(os.homedir(), ".codex", "auth.json");
   if (!fs.existsSync(file)) throw new Error(`未找到 ${file}`);
@@ -419,6 +461,11 @@ async function importLocalCodexAccount() {
 function notifyGatewayStatus(status = gateway?.status()) {
   if (!status || !mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("gateway:status-changed", status);
+}
+
+function notifyMcpGatewayStatus(status = mcpGateway?.status()) {
+  if (!status || !mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("mcpGateway:status-changed", status);
 }
 
 function notifyDataChanged(types) {
@@ -590,6 +637,30 @@ async function shutdownRuntime(reason, error) {
           action: "stop",
           status: "failed",
           message: `退出时关闭网关失败：${stopError.message}`
+        });
+      }
+    }
+  }
+  if (mcpGateway) {
+    try {
+      const wasRunning = mcpGateway.status().running;
+      await mcpGateway.stop();
+      if (store && wasRunning) {
+        store.addAppLog({
+          scope: "mcp-gateway",
+          action: "stop",
+          status: reason,
+          message: `退出时停止 MCP 网关：${reason}`
+        });
+      }
+    } catch (stopError) {
+      if (store) {
+        store.addAppLog({
+          level: "error",
+          scope: "mcp-gateway",
+          action: "stop",
+          status: "failed",
+          message: `退出时关闭 MCP 网关失败：${stopError.message}`
         });
       }
     }
