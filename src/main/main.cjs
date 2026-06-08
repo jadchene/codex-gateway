@@ -77,10 +77,10 @@ app.whenReady().then(async () => {
   }
   if (store.getSettings().auto_start_mcp_gateway === "true") {
     mcpGateway.start().then((status) => {
-      store.addAppLog({ scope: "mcp-gateway", action: "auto-start", status: "success", message: "应用启动时自动启动 MCP 网关" });
+      store.addAppLog({ scope: "mcp", action: "auto-start", status: "success", message: "应用启动时自动启动 MCP 网关" });
       notifyMcpGatewayStatus(status);
     }).catch((error) => {
-      store.addAppLog({ level: "error", scope: "mcp-gateway", action: "auto-start", status: "failed", message: error.message });
+      store.addAppLog({ level: "error", scope: "mcp", action: "auto-start", status: "failed", message: error.message });
     });
   }
   if (isStartupHiddenLaunch()) {
@@ -378,7 +378,7 @@ async function stopGateway(reason = "manual") {
 async function startMcpGateway(reason = "manual") {
   const status = await mcpGateway.start();
   store.addAppLog({
-    scope: "mcp-gateway",
+    scope: "mcp",
     action: "start",
     status: "success",
     message: reason === "manual" ? "MCP 网关已启动" : `${reason}: MCP 网关已启动`
@@ -390,7 +390,7 @@ async function startMcpGateway(reason = "manual") {
 async function stopMcpGateway(reason = "manual") {
   const status = await mcpGateway.stop();
   store.addAppLog({
-    scope: "mcp-gateway",
+    scope: "mcp",
     action: "stop",
     status: "success",
     message: reason === "manual" ? "MCP 网关已停止" : `${reason}: MCP 网关已停止`
@@ -647,7 +647,7 @@ async function shutdownRuntime(reason, error) {
       await mcpGateway.stop();
       if (store && wasRunning) {
         store.addAppLog({
-          scope: "mcp-gateway",
+          scope: "mcp",
           action: "stop",
           status: reason,
           message: `退出时停止 MCP 网关：${reason}`
@@ -657,7 +657,7 @@ async function shutdownRuntime(reason, error) {
       if (store) {
         store.addAppLog({
           level: "error",
-          scope: "mcp-gateway",
+          scope: "mcp",
           action: "stop",
           status: "failed",
           message: `退出时关闭 MCP 网关失败：${stopError.message}`

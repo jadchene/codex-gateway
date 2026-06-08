@@ -1459,7 +1459,8 @@ function providerToml(settings) {
     "[model_providers.codex_gateway]",
     'name = "OpenAI"',
     `base_url = "http://${host}:${port}/v1"`,
-    'wire_api = "responses"'
+    'wire_api = "responses"',
+    "supports_websockets = false"
   ].join("\n");
 }
 

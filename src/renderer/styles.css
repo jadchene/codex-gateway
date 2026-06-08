@@ -715,6 +715,20 @@ textarea {
   display: flex;
 }
 
+.gateway-service-grid .gateway-box:first-child .info-row {
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+}
+
+.gateway-service-grid .gateway-box:nth-child(2) .info-row {
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+}
+
+.gateway-service-grid .gateway-box:nth-child(2) .info-box {
+  align-content: start;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
 .gateway-box .copy-row,
 .info-row {
   display: grid;
