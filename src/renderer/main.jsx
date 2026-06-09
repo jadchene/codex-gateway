@@ -431,9 +431,9 @@ function Dashboard({ accounts, gateway, mcpGateway, tokenSummary, quotaSummary, 
         </div>
       </div>
       <div className="dashboard-grid">
-        <Metric title="可用账号" value={`${usable}/${accounts.length}`} />
-        <Metric title="Codex 网关" value={gateway.running ? "运行中" : "未启动"} />
-        <Metric title="MCP 网关" value={mcpGateway.running ? "运行中" : "未启动"} />
+        <Metric title="可用账号" value={`${usable}/${accounts.length}`} className="dashboard-account-metric" />
+        <Metric title="Codex 网关" value={gateway.running ? "运行中" : "未启动"} className="dashboard-codex-metric" />
+        <Metric title="MCP 网关" value={mcpGateway.running ? "运行中" : "未启动"} className="dashboard-mcp-metric" />
       </div>
       <div className="dashboard-grid quota-metric-grid">
         <QuotaMetric title="5 小时剩余额度" detail={quotaSummary?.primary} />
@@ -1309,13 +1309,13 @@ function usePagedQuery(onQuery, pageData) {
   };
 }
 
-function Metric({ title, value, hint }) {
+function Metric({ title, value, hint, className = "" }) {
   const isPlainNumber = typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value));
   const displayValue = isPlainNumber
     ? formatTokenNumber(value)
     : value;
   const titleText = hint || "";
-  return <article className="panel metric" title={titleText}><span>{title}</span><strong>{displayValue}</strong></article>;
+  return <article className={`panel metric ${className}`.trim()} title={titleText}><span>{title}</span><strong>{displayValue}</strong></article>;
 }
 
 function QuotaMetric({ title, detail }) {

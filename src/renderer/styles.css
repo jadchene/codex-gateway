@@ -261,6 +261,21 @@ h1 {
   margin-top: 18px;
 }
 
+.dashboard-account-metric {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.dashboard-codex-metric {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.dashboard-mcp-metric {
+  grid-column: 2;
+  grid-row: 2;
+}
+
 .divider-title {
   margin: 18px 0 12px;
   padding-top: 16px;
@@ -1221,6 +1236,13 @@ tfoot td,
 
   .span-2 {
     grid-column: auto;
+  }
+
+  .dashboard-account-metric,
+  .dashboard-codex-metric,
+  .dashboard-mcp-metric {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .sidebar {
