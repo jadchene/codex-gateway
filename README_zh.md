@@ -2,70 +2,79 @@
 
 [English README](README.md)
 
-**免责声明**：本项目仅用于学习和本地开发测试。使用者必须遵守相关平台的服务条款。本项目只面向个人本机使用，不提供、不分发任何账号、API Key、账号服务或代理服务，也不应被用于多用户共享、商业转售、规避限制或其它违反服务条款的用途。请自行承担使用风险。
+Codex Gateway 是一个本地桌面应用，用于管理个人 Codex/ChatGPT 登录状态、切换本机 Codex CLI 认证模式、查看额度信息，并运行本地网关服务。
 
-Codex Gateway 是一个本地桌面应用，用于管理个人 Codex/ChatGPT 登录状态、切换 Codex 认证模式、查看额度信息，并运行本地网关服务。应用基于 Electron、React 和 Vite 构建，数据保存在本机 SQLite。
+项目基于 Electron、React、Vite 和本地 SQLite 存储构建。它面向个人本地开发场景，把账号、网关状态、Codex CLI 认证文件、请求记录和本地 MCP 网关进程控制集中到一个应用里。
 
-## 功能概览
+## 功能
 
-- **账号管理**：通过浏览器 OAuth 添加个人账号，也可以导入本机已有的 Codex 认证文件。
-- **额度查看**：记录 5 小时和 7 天额度窗口，支持手动刷新、定时刷新和网关失败切换前刷新。
-- **Codex 认证管理**：在本地网关模式和直接账号模式之间切换，并写入 `~/.codex/auth.json`、`~/.codex/config.toml`。
-- **Codex 网关服务**：提供本机 OpenAI 兼容的 `/v1` 网关入口，用于 Codex 相关请求。
-- **MCP 网关服务控制**：在应用内启动和停止外部 `mcp-gateway-service` 的 Streamable HTTP 模式。
-- **调用记录**：保存请求路径、上游路径、账号、会话 ID、耗时、状态和 token 使用情况。
-- **会话管理**：从调用记录保存 Codex 会话 ID，并维护名称、备注、查询和删除。
-- **运行日志**：查看应用启动、认证写入、网关事件、额度刷新和异常信息。
-- **应用配置**：配置端口、API Key、自动启动、关闭到托盘、计费系数、MCP 网关和本地日志清理。
+- 通过浏览器 OAuth 添加个人账号，或导入已有的本地 Codex auth 文件。
+- 查看 5 小时和 7 天额度窗口，支持手动、定时或网关故障切换前刷新用量。
+- 在本机 Codex CLI 的网关模式和直接账号模式之间切换。
+- 运行面向 Codex 请求的本地 OpenAI-compatible `/v1` 网关。
+- 以 Streamable HTTP 模式启动和停止外部 `mcp-gateway-service` 进程。
+- 保存网关调用记录，包括路径、上游路径、账号、session ID、耗时、状态和 token 用量。
+- 从调用记录中保存、命名、搜索和删除 Codex session ID。
+- 查看认证写入、网关事件、用量刷新和失败信息等本地运行日志。
+- 配置端口、本地 API key、自启动、托盘行为、显示用计费系数和日志清理。
 
-## 界面说明
+## 为什么使用它
 
-- **仪表盘**：显示可用账号数量、Codex 网关状态、MCP 网关状态、额度概览和今日 token 使用情况。
-- **账号管理**：添加账号、启停账号、刷新额度、导入本机 Codex 凭据。
-- **认证管理**：把网关模式或账号模式应用到本机 Codex CLI 配置。
-- **网关服务**：分别控制内置 Codex 网关和外部 MCP 网关。
-- **会话管理**：为 Codex 会话 ID 保存名称和备注。
-- **调用记录**：按日期、账号和会话 ID 查询网关调用日志。
-- **运行日志**：查看本地应用运行记录。
-- **应用配置**：编辑网关、启动、刷新、计费、MCP 网关和清理相关配置。
+- 不需要手工编辑 `~/.codex/auth.json` 和 `~/.codex/config.toml`，Codex 相关本地状态集中管理。
+- 当某个账号出现认证、额度或限流错误时，网关可以尝试下一个可用账号，减少个人开发中的手动切换。
+- 请求历史、session 名称、额度快照和运行日志都保存在本地 SQLite。
+- Codex 网关和 MCP 网关进程可以在同一个界面里分别控制。
 
-## Codex 网关
+## 快速开始
 
-内置 Codex 网关提供较小的本机 OpenAI 兼容接口面：
+安装依赖并启动桌面应用：
+
+```bash
+npm install
+npm run dev
+```
+
+渲染进程开发服务器地址：
+
+```text
+http://127.0.0.1:8435
+```
+
+首次使用流程：
+
+1. 打开应用，在 Accounts 页面添加个人账号。
+2. 在 Gateway Services 页面启动 Codex gateway。
+3. 在 Auth Management 页面应用 Gateway mode。
+4. 正常使用 Codex CLI；它会调用应用写入的本地网关 provider。
+5. 需要时在应用里查看额度、调用记录、session 和日志。
+
+## Codex Gateway API
+
+内置网关暴露一组小型 OpenAI-compatible 本地接口：
 
 - `GET /v1/models`
 - `POST /v1/responses`
 - `POST /v1/responses/compact`
 
-网关会把请求转发到配置的 Codex 上游地址。它只替换上游调用需要的 `Authorization` 和 `ChatGPT-Account-ID` 请求头。图片接口不受支持。
-
-默认 Codex 网关配置：
+默认本地配置：
 
 ```text
-主机: localhost
-端口: 8436
-Base URL: http://localhost:8436/v1
-API Key: local-personal-token
+host: localhost
+port: 8436
+base URL: http://localhost:8436/v1
+API key: local-personal-token
 ```
 
-API Key 和监听配置都可以在应用配置中修改。
+API key、监听 host 和端口可以在应用设置中修改。网关会把请求转发到配置的上游 Codex 后端，只替换上游 `Authorization` 和 `ChatGPT-Account-ID` 请求头。不支持图片接口。
 
-## 账号使用模型
+## Codex CLI 认证模式
 
-每次网关请求只会选择一个当前可用账号发起上游调用。如果该账号返回认证失效、额度不足或限流错误，应用会刷新本地额度信息，并为当前请求尝试下一个可用账号。
+Auth Management 支持两种模式：
 
-只要当前账号仍可用，应用会继续使用它。每天本地日期首次网关请求可以按 7 天剩余额度重新选择账号。
+- Gateway mode：向 `~/.codex/auth.json` 写入本地 `OPENAI_API_KEY`，并确保 `~/.codex/config.toml` 中存在 `codex_gateway` provider。
+- Account mode：把选中的本地账号 token 写入 `~/.codex/auth.json`，并移除本应用写入的 gateway provider。
 
-这个机制用于个人本地开发时减少手动切换账号配置的操作，不应被理解为并发调度、资源池聚合、额度叠加或绕过服务限制。
-
-## Codex 认证接入
-
-认证管理页面支持两种模式：
-
-- **网关模式**：向 `~/.codex/auth.json` 写入本地 `OPENAI_API_KEY`，并确保 `~/.codex/config.toml` 中存在 `codex_gateway` provider。
-- **账号模式**：把选中的本地账号 token 写入 `~/.codex/auth.json`，并移除本应用写入的网关 provider。
-
-网关 provider 示例：
+Gateway provider 示例：
 
 ```toml
 model_provider = "codex_gateway"
@@ -76,35 +85,27 @@ base_url = "http://localhost:8436/v1"
 wire_api = "responses"
 ```
 
-当监听主机是 `0.0.0.0` 时，生成的 provider URL 会使用 `localhost`，方便 Codex CLI 连接本机服务。
+当监听 host 是 `0.0.0.0` 时，生成的 provider URL 仍使用 `localhost`，方便 Codex CLI 连接本地服务。
 
-## MCP 网关控制
+## MCP Gateway 控制
 
-Codex Gateway 可以管理外部 [`mcp-gateway-service`](https://www.npmjs.com/package/@jadchene/mcp-gateway-service) 进程，并以 Streamable HTTP 模式启动。
+Codex Gateway 可以管理外部 [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway) 进程，并以 Streamable HTTP 模式启动。
 
-应用内 MCP 网关默认配置：
+默认 MCP gateway 配置：
 
 ```text
-主机: 127.0.0.1
-端口: 3000
-路径: /mcp
+host: 127.0.0.1
+port: 3000
+path: /mcp
 ```
 
-应用会使用 `--http` 启动服务，并按配置追加可选参数：
+应用生成的命令示例：
 
 ```bash
 mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 --path /mcp --json-response
 ```
 
-只有已填写或已启用的选项才会传入：
-
-- 配置路径会对应 `--config <path>`。
-- 主机会对应 `--host <host>`。
-- 端口会对应 `--port <port>`。
-- 路径会对应 `--path <path>`。
-- JSON Response 只有启用时才会传入 `--json-response`。
-
-在 Windows 上，停止 MCP 网关时会结束进程树，避免子进程残留导致端口占用。
+只有填写或启用的选项会被传入。Windows 下停止 MCP gateway 时会终止进程树，避免子进程残留。
 
 ## 本地数据
 
@@ -115,36 +116,9 @@ data/codex-gateway.sqlite
 data/browser
 ```
 
-SQLite 会保存：
+SQLite 保存账号元数据、由应用运行时处理的加密 token 数据、额度快照、网关调用记录、session 名称和备注、运行日志以及应用设置。
 
-- 账号 token 和账号元数据
-- 额度快照
-- 网关调用记录
-- 已保存的 Codex 会话名称和备注
-- 运行日志
-- 应用配置
-
-请不要提交 `data/`、`~/.codex/auth.json`、`~/.codex/config.toml` 或任何包含 token 的文件。
-
-## 快速开始
-
-安装依赖：
-
-```bash
-npm install
-```
-
-以开发模式运行应用：
-
-```bash
-npm run dev
-```
-
-Vite 开发服务地址：
-
-```text
-http://127.0.0.1:8435
-```
+不要提交 `data/`、`~/.codex/auth.json`、`~/.codex/config.toml` 或任何包含 token 的文件。
 
 ## 开发
 
@@ -160,7 +134,7 @@ npm test
 npm run build
 ```
 
-运行完整验证：
+运行完整校验：
 
 ```bash
 npm run verify
@@ -168,31 +142,24 @@ npm run verify
 
 ## 打包
 
-创建 Windows 未压缩构建：
+创建 Windows unpacked 构建：
 
 ```bash
 npm run pack:unpacked
 ```
 
-输出目录：
-
-```text
-release/win-unpacked
-```
-
-Windows 可执行文件：
+输出：
 
 ```text
 release/win-unpacked/Codex Gateway.exe
 ```
 
-## 备注
+## 安全与条款
 
-- 应用是本地优先设计，不需要托管后端。
-- 关闭窗口时可以选择退出应用或最小化到系统托盘。
-- 网关和额度刷新事件会写入本地运行日志。
-- 应用配置中的计费系数只影响本地使用统计的展示计算。
+本项目仅用于学习和个人本地开发。用户必须遵守相关平台的服务条款。
+
+项目不提供或分发账号、API key、账号即服务或代理服务。不要将它用于多人共享、商业转售、绕过平台限制，或任何违反服务条款的活动。
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

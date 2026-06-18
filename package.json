@@ -4,6 +4,21 @@
   "description": "Personal Codex account manager and local gateway.",
   "license": "MIT",
   "author": "jadchene",
+  "keywords": [
+    "codex",
+    "gateway",
+    "electron",
+    "local-first",
+    "desktop"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jadchene/codex-gateway.git"
+  },
+  "homepage": "https://github.com/jadchene/codex-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/jadchene/codex-gateway/issues"
+  },
   "main": "src/main/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:8435 && electron .\"",

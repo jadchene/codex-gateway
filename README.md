@@ -2,44 +2,61 @@
 
 [中文文档](README_zh.md)
 
-**Disclaimer**: This project is for learning and local development only. Users must comply with the Terms of Service of the relevant platforms. It is intended for personal local use and does not provide or distribute accounts, API keys, accounts-as-a-service, or proxy services. It must not be used for multi-user sharing, commercial resale, bypassing limits, or any other activity that violates service terms. Use it at your own risk.
+Codex Gateway is a local desktop app for managing personal Codex/ChatGPT login state, switching local Codex CLI authentication modes, viewing quota information, and running local gateway services.
 
-Codex Gateway is a local desktop app for managing personal Codex/ChatGPT login state, switching Codex authentication modes, viewing quota information, and running local gateway services. It is built with Electron, React, and Vite. Data is stored locally in SQLite.
+It is built with Electron, React, Vite, and local SQLite storage. It is intended for personal local development workflows where you want one place to manage accounts, gateway state, Codex CLI auth files, request records, and local MCP gateway process control.
 
-## What It Provides
+## Features
 
-- **Account management**: Add personal accounts through browser OAuth or import an existing local Codex auth file.
-- **Quota visibility**: Track 5-hour and 7-day quota windows and refresh usage manually, on a timer, or before gateway failover.
-- **Codex auth management**: Switch Codex between local gateway mode and direct account mode by writing `~/.codex/auth.json` and `~/.codex/config.toml`.
-- **Codex gateway service**: Expose a local OpenAI-compatible `/v1` gateway for Codex-oriented routes.
-- **MCP gateway service control**: Start and stop an external `mcp-gateway-service` in Streamable HTTP mode from the app.
-- **Call records**: Store request path, upstream path, account, session ID, duration, status, and token usage.
-- **Session management**: Save, name, search, and delete Codex session IDs from call records.
-- **Runtime logs**: Review startup, auth writes, gateway events, usage refreshes, and failures.
-- **App settings**: Configure ports, API keys, auto-start behavior, close-to-tray behavior, billing factors, and local log cleanup.
+- Manage personal accounts through browser OAuth or by importing an existing local Codex auth file.
+- View 5-hour and 7-day quota windows and refresh usage manually, on a timer, or before gateway failover.
+- Switch the local Codex CLI between gateway mode and direct account mode.
+- Run a local OpenAI-compatible `/v1` gateway for Codex-oriented routes.
+- Start and stop an external `mcp-gateway-service` process in Streamable HTTP mode.
+- Store gateway call records with path, upstream path, account, session ID, duration, status, and token usage.
+- Save, name, search, and delete Codex session IDs from call records.
+- Review local runtime logs for auth writes, gateway events, usage refreshes, and failures.
+- Configure ports, local API keys, startup behavior, tray behavior, display billing factors, and log cleanup.
 
-## Interface Overview
+## Why Use It
 
-- **Dashboard**: Shows available account count, Codex gateway status, MCP gateway status, quota summaries, and today's token usage.
-- **Accounts**: Adds accounts, enables or disables accounts, refreshes account usage, and imports local Codex credentials.
-- **Auth Management**: Applies gateway mode or account mode to the local Codex CLI configuration.
-- **Gateway Services**: Controls the built-in Codex gateway and the external MCP gateway service separately.
-- **Session Management**: Stores friendly names and notes for Codex session IDs.
-- **Call Records**: Queries gateway call logs by date, account, and session ID.
-- **Runtime Logs**: Shows local app operation logs.
-- **Settings**: Edits gateway, startup, refresh, billing, MCP gateway, and cleanup settings.
+- Keep Codex-related local state in one app instead of editing `~/.codex/auth.json` and `~/.codex/config.toml` by hand.
+- Reduce manual account switching during personal development by trying another available account when one account hits auth, quota, or rate-limit errors.
+- Keep request history, session names, quota snapshots, and runtime logs in a local SQLite database.
+- Control the Codex gateway and MCP gateway process separately from the same interface.
 
-## Codex Gateway
+## Quick Start
 
-The built-in Codex gateway exposes a small local OpenAI-compatible surface for Codex requests:
+Install dependencies and start the desktop app:
+
+```bash
+npm install
+npm run dev
+```
+
+The renderer development server runs at:
+
+```text
+http://127.0.0.1:8435
+```
+
+Typical first-time flow:
+
+1. Open the app and add a personal account from the Accounts page.
+2. Start the Codex gateway from Gateway Services.
+3. Open Auth Management and apply Gateway mode.
+4. Use the Codex CLI normally; it will call the local gateway provider written by the app.
+5. Review quota, call records, sessions, and logs from the app when needed.
+
+## Codex Gateway API
+
+The built-in gateway exposes a small OpenAI-compatible local surface:
 
 - `GET /v1/models`
 - `POST /v1/responses`
 - `POST /v1/responses/compact`
 
-The gateway forwards requests to the configured upstream Codex backend. It replaces only the upstream `Authorization` and `ChatGPT-Account-ID` headers. Image endpoints are not supported.
-
-The default local gateway settings are:
+Default local settings:
 
 ```text
 host: localhost
@@ -48,22 +65,14 @@ base URL: http://localhost:8436/v1
 API key: local-personal-token
 ```
 
-The API key and listener settings can be changed in the app.
+The API key, host, and port can be changed in the app settings. The gateway forwards requests to the configured upstream Codex backend and replaces only the upstream `Authorization` and `ChatGPT-Account-ID` headers. Image endpoints are not supported.
 
-## Account Usage Model
+## Codex CLI Auth Modes
 
-For each gateway request, the app picks one currently available account. If that account returns an authentication, quota, or rate-limit error, the app refreshes local usage information and tries the next available account for that request.
+Auth Management supports two modes:
 
-The app keeps the current account while it remains usable. Once per local day, the first gateway request can rebalance toward an account with more remaining 7-day quota.
-
-This behavior is intended to reduce manual account switching during personal local development. It should not be interpreted as concurrent scheduling, resource pooling, quota aggregation, or a way to bypass service restrictions.
-
-## Codex Auth Integration
-
-The Auth Management page supports two modes:
-
-- **Gateway mode**: writes a local `OPENAI_API_KEY` to `~/.codex/auth.json` and ensures `~/.codex/config.toml` contains a `codex_gateway` provider.
-- **Account mode**: writes the selected local account token to `~/.codex/auth.json` and removes the gateway provider written by this app.
+- Gateway mode writes a local `OPENAI_API_KEY` to `~/.codex/auth.json` and ensures `~/.codex/config.toml` contains a `codex_gateway` provider.
+- Account mode writes the selected local account token to `~/.codex/auth.json` and removes the gateway provider written by this app.
 
 Gateway provider example:
 
@@ -76,13 +85,13 @@ base_url = "http://localhost:8436/v1"
 wire_api = "responses"
 ```
 
-When the listener host is `0.0.0.0`, the generated provider URL uses `localhost` so the Codex CLI can connect to the local service.
+When the listener host is `0.0.0.0`, the generated provider URL still uses `localhost` so the Codex CLI can connect to the local service.
 
 ## MCP Gateway Control
 
-Codex Gateway can manage an external [`mcp-gateway-service`](https://www.npmjs.com/package/@jadchene/mcp-gateway-service) process in Streamable HTTP mode.
+Codex Gateway can manage an external [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway) process in Streamable HTTP mode.
 
-Default MCP gateway settings in the app are:
+Default MCP gateway settings:
 
 ```text
 host: 127.0.0.1
@@ -90,21 +99,13 @@ port: 3000
 path: /mcp
 ```
 
-The app starts the service with `--http` and adds optional arguments from settings:
+Example command generated by the app:
 
 ```bash
 mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 --path /mcp --json-response
 ```
 
-Only filled or enabled options are passed:
-
-- `--config <path>` is included when a config path is set.
-- `--host <host>` is included when a host is set.
-- `--port <port>` is included when a port is set.
-- `--path <path>` is included when a path is set.
-- `--json-response` is included only when JSON Response is enabled.
-
-On Windows, stopping the MCP gateway uses process-tree termination so child processes are also stopped.
+Only filled or enabled options are passed. On Windows, stopping the MCP gateway uses process-tree termination so child processes are also stopped.
 
 ## Local Data
 
@@ -115,36 +116,9 @@ data/codex-gateway.sqlite
 data/browser
 ```
 
-SQLite stores:
-
-- account tokens and account metadata
-- quota snapshots
-- gateway call records
-- saved Codex session names and notes
-- runtime logs
-- application settings
+SQLite stores account metadata, encrypted token data handled by the app runtime, quota snapshots, gateway call records, saved session names and notes, runtime logs, and app settings.
 
 Do not commit `data/`, `~/.codex/auth.json`, `~/.codex/config.toml`, or any file containing tokens.
-
-## Quick Start
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Run the app in development mode:
-
-```bash
-npm run dev
-```
-
-The Vite development server runs at:
-
-```text
-http://127.0.0.1:8435
-```
 
 ## Development
 
@@ -174,25 +148,18 @@ Create an unpacked Windows build:
 npm run pack:unpacked
 ```
 
-Output directory:
-
-```text
-release/win-unpacked
-```
-
-Windows executable:
+Output:
 
 ```text
 release/win-unpacked/Codex Gateway.exe
 ```
 
-## Notes
+## Safety and Terms
 
-- The app is local-first and does not require a hosted backend.
-- Close behavior can be set to exit the app or minimize it to the system tray.
-- Gateway and usage refresh events are written to local runtime logs.
-- Billing factors in settings affect display calculations for local usage summaries only.
+This project is for learning and personal local development only. Users must comply with the Terms of Service of the relevant platforms.
+
+The project does not provide or distribute accounts, API keys, accounts-as-a-service, or proxy services. Do not use it for multi-user sharing, commercial resale, bypassing platform limits, or any other activity that violates service terms.
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
