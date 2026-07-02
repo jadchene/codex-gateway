@@ -462,6 +462,8 @@ function isUsableAccount(account) {
 
 function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin, onImportLocal, onCancelLogin, onRefreshUsage, onRefreshAll, onSetEnabled, onDelete }) {
   const [showAddOptions, setShowAddOptions] = useState(false);
+  const [resetCreditsAccount, setResetCreditsAccount] = useState(null);
+  const resetCredits = parseResetCredits(resetCreditsAccount);
   return (
     <section className="panel">
       <div className="section-title">
@@ -519,6 +521,7 @@ function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin
             <Quota label="7 天" value={account.quota_7d_used_percent} resetAt={account.quota_7d_reset_at} />
             <div className="meta-row"><span>套餐</span><b>{account.subscription_plan || "未知"}</b></div>
             <div className="meta-row"><span>订阅期限</span><b>{formatTime(account.subscription_expires_at)}</b></div>
+            <div className="meta-row"><span>重置</span><b>{formatResetCreditsSummary(account)}</b></div>
             <div className="card-actions">
               <button onClick={() => onSetEnabled(account, !account.enabled)}>
                 {account.enabled ? "停用" : "启用"}
@@ -526,12 +529,42 @@ function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin
               <button onClick={() => onRefreshUsage(account)} disabled={refreshingIds.has(account.id)}>
                 {refreshingIds.has(account.id) ? "刷新中..." : retryIds.has(account.id) ? "重试刷新" : "刷新"}
               </button>
+              <button onClick={() => setResetCreditsAccount(account)}>重置</button>
               <button className="danger ghost" onClick={() => onDelete(account.id)}>删除</button>
             </div>
           </article>
         ))}
         {accounts.length === 0 && <div className="empty">还没有账号。点击“添加账号”完成 ChatGPT/Codex 授权。</div>}
       </div>
+      {resetCreditsAccount && (
+        <div className="modal-backdrop" onClick={() => setResetCreditsAccount(null)}>
+          <div className="modal reset-credits-modal" role="dialog" aria-modal="true" aria-labelledby="reset-credits-title" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <h3 id="reset-credits-title">重置次数</h3>
+                <p className="subtle">{resetCreditsAccount.name} · 可用 {resetCredits.availableCount} 次</p>
+              </div>
+              <button className="modal-close" type="button" aria-label="关闭" onClick={() => setResetCreditsAccount(null)}>×</button>
+            </div>
+            <div className="table-wrap reset-credits-table-wrap">
+              <table className="reset-credits-table">
+                <thead><tr><th>状态</th><th>重置类型</th><th>有效期开始</th><th>有效期结束</th></tr></thead>
+                <tbody>
+                  {resetCredits.credits.map((credit, index) => (
+                    <tr key={`${credit.title}-${credit.granted_at}-${credit.expires_at}-${index}`}>
+                      <td>{resetCreditStatusLabel(credit.status)}</td>
+                      <td>{credit.title || "-"}</td>
+                      <td>{formatTime(credit.granted_at)}</td>
+                      <td>{formatTime(credit.expires_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {resetCredits.credits.length === 0 && <div className="empty">暂无重置次数数据，请先刷新账号额度。</div>}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -1358,6 +1391,35 @@ function Quota({ label, value, resetAt }) {
       <small>已用 {usedPercent.toFixed(1)}% · 重置：{formatTime(resetAt)}</small>
     </div>
   );
+}
+
+function parseResetCredits(account) {
+  let parsed = {};
+  try {
+    parsed = account?.reset_credits_json ? JSON.parse(account.reset_credits_json) : {};
+  } catch {
+    parsed = {};
+  }
+  const credits = Array.isArray(parsed.credits) ? parsed.credits : [];
+  const availableCount = Number(account?.reset_credits_available_count ?? parsed.available_count ?? 0);
+  return {
+    availableCount: Number.isFinite(availableCount) ? Math.max(0, Math.trunc(availableCount)) : 0,
+    credits
+  };
+}
+
+function formatResetCreditsSummary(account) {
+  const count = Number(account?.reset_credits_available_count || 0);
+  const expiresAt = Number(account?.reset_credits_next_expires_at || 0);
+  return `${Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0} 次，${expiresAt ? formatTime(expiresAt) : "暂无到期时间"}`;
+}
+
+function resetCreditStatusLabel(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "available") return "可用";
+  if (value === "used") return "已使用";
+  if (value === "expired") return "已过期";
+  return status || "-";
 }
 
 function formatTime(value) {

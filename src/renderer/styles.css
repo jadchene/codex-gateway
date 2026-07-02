@@ -180,6 +180,7 @@ h1 {
   justify-content: flex-end;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .section-title {
@@ -243,6 +244,10 @@ h1 {
 .session-modal {
   display: grid;
   gap: 12px;
+}
+
+.reset-credits-modal {
+  width: min(760px, 100%);
 }
 
 .subtle {
@@ -958,12 +963,20 @@ code {
   overflow-x: auto;
 }
 
+.reset-credits-table-wrap {
+  overflow-x: auto;
+}
+
 table {
   width: 100%;
   min-width: 940px;
   border-collapse: separate;
   border-spacing: 0;
   margin-top: 12px;
+}
+
+.reset-credits-table {
+  min-width: 680px;
 }
 
 .app-log-table {

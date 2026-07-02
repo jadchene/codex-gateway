@@ -11,6 +11,8 @@ function timestampFrom(value) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value > 10_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
   }
+  const cst = parseChinaStandardTime(value);
+  if (cst !== null) return cst;
   const parsed = Date.parse(String(value));
   return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : null;
 }
@@ -45,9 +47,56 @@ function normalizeUsagePayload(payload) {
   return usage;
 }
 
+function normalizeResetCreditsPayload(payload) {
+  const root = payload?.reset_credits || payload?.rate_limit_reset_credits || payload || {};
+  const rawCredits = Array.isArray(root.credits)
+    ? root.credits
+    : Array.isArray(root.items)
+      ? root.items
+      : [];
+  const credits = rawCredits.map((item) => ({
+    status: cleanText(item?.status),
+    title: cleanText(item?.title || item?.type || item?.reset_type),
+    granted_at: timestampFrom(item?.granted_at ?? item?.starts_at ?? item?.valid_from),
+    expires_at: timestampFrom(item?.expires_at ?? item?.ends_at ?? item?.valid_until)
+  }));
+  const availableCount = finiteNumber(root.available_count ?? root.availableCount)
+    ?? credits.filter((item) => item.status === "available").length;
+  const nextExpiresAt = nearestFutureExpiry(credits);
+  return {
+    reset_credits_available_count: Math.max(0, Math.trunc(availableCount)),
+    reset_credits_next_expires_at: nextExpiresAt,
+    reset_credits_json: JSON.stringify({
+      available_count: Math.max(0, Math.trunc(availableCount)),
+      credits
+    })
+  };
+}
+
 function finiteNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function cleanText(value) {
+  return String(value || "").trim();
+}
+
+function nearestFutureExpiry(credits) {
+  const now = Math.floor(Date.now() / 1000);
+  const expiries = credits
+    .filter((item) => item.status === "available")
+    .map((item) => Number(item.expires_at || 0))
+    .filter((value) => Number.isFinite(value) && value > 0 && value >= now)
+    .sort((a, b) => a - b);
+  return expiries[0] || 0;
+}
+
+function parseChinaStandardTime(value) {
+  const match = String(value || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s+CST$/i);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match.map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day, hour - 8, minute, second) / 1000);
 }
 
 function readUsedPercent(limit) {
@@ -77,6 +126,7 @@ function addLimitGroup(windows, group) {
 
 module.exports = {
   normalizeUsagePayload,
+  normalizeResetCreditsPayload,
   timestampFrom,
   percentFromLimit,
   collectRateLimitWindows

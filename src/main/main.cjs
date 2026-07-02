@@ -7,7 +7,7 @@ const { createStore } = require("./store.cjs");
 const { createGateway, buildCodexQuotaHeaderDetail } = require("./gateway.cjs");
 const { createMcpGatewayService } = require("./mcp-gateway-service.cjs");
 const { createAuthService, accountFromTokens } = require("./auth.cjs");
-const { normalizeUsagePayload } = require("./quota.cjs");
+const { normalizeUsagePayload, normalizeResetCreditsPayload } = require("./quota.cjs");
 const { applyGatewayMode, applyAccountMode, detectCodexAuthMode } = require("./codex-cli-auth.cjs");
 
 fs.mkdirSync(browserDataDir(), { recursive: true });
@@ -839,12 +839,19 @@ async function refreshUsage(id) {
     "https://chatgpt.com/backend-api/wham/usage"
     // "https://chatgpt.com/backend-api/codex/usage" currently returns 403 HTML for account tokens.
   ];
+  const resetCreditsEndpoint = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     for (const endpoint of endpoints) {
       try {
-        const payload = await requestUsage(endpoint, account);
-        const usage = normalizeUsagePayload(payload);
+        const [usagePayload, resetCreditsPayload] = await Promise.all([
+          requestJson(endpoint, account),
+          requestJson(resetCreditsEndpoint, account)
+        ]);
+        const usage = {
+          ...normalizeUsagePayload(usagePayload),
+          ...normalizeResetCreditsPayload(resetCreditsPayload)
+        };
         store.updateUsage(id, usage);
         const refreshed = store.listAccounts().find((item) => item.id === id);
         scheduleUsageResetRefresh(refreshed, "usage-refresh");
@@ -1001,7 +1008,7 @@ async function refreshGatewayAccountToken(accountId) {
   return saved;
 }
 
-async function requestUsage(endpoint, account) {
+async function requestJson(endpoint, account) {
   const resp = await fetch(endpoint, {
     headers: {
       authorization: `Bearer ${account.access_token}`,

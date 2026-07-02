@@ -3,7 +3,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { normalizeUsagePayload, percentFromLimit, timestampFrom } = require("../src/main/quota.cjs");
+const { normalizeUsagePayload, normalizeResetCreditsPayload, percentFromLimit, timestampFrom } = require("../src/main/quota.cjs");
 
 test("percentFromLimit handles common limit shapes", () => {
   assert.equal(percentFromLimit({ used: 25, limit: 100 }), 25);
@@ -14,6 +14,7 @@ test("timestampFrom accepts seconds, milliseconds, and ISO strings", () => {
   assert.equal(timestampFrom(1_700_000_000), 1_700_000_000);
   assert.equal(timestampFrom(1_700_000_000_000), 1_700_000_000);
   assert.equal(timestampFrom("2026-05-03T00:00:00.000Z"), 1_777_766_400);
+  assert.equal(timestampFrom("2026-07-27 08:05:59 CST"), 1_785_110_759);
 });
 
 test("normalizeUsagePayload extracts 5h and 7d quota windows", () => {
@@ -73,4 +74,49 @@ test("normalizeUsagePayload ignores empty quota windows instead of writing zero"
   assert.equal("quota_5h_reset_at" in usage, false);
   assert.equal("quota_7d_used_percent" in usage, false);
   assert.equal("quota_7d_reset_at" in usage, false);
+});
+
+test("normalizeResetCreditsPayload extracts available reset credits", () => {
+  const credits = normalizeResetCreditsPayload({
+    status_code: 200,
+    available_count: 1,
+    credits: [
+      {
+        status: "available",
+        title: "Full reset (Weekly + 5 hr)",
+        granted_at: "2026-06-27 08:05:59 CST",
+        expires_at: "2099-07-27 08:05:59 CST"
+      },
+      {
+        status: "expired",
+        title: "Old reset",
+        granted_at: "2026-01-01T00:00:00.000Z",
+        expires_at: "2026-02-01T00:00:00.000Z"
+      }
+    ]
+  });
+  assert.equal(credits.reset_credits_available_count, 1);
+  assert.equal(credits.reset_credits_next_expires_at, 4_088_793_959);
+  const parsed = JSON.parse(credits.reset_credits_json);
+  assert.equal(parsed.available_count, 1);
+  assert.equal(parsed.credits[0].status, "available");
+  assert.equal(parsed.credits[0].title, "Full reset (Weekly + 5 hr)");
+  assert.equal(parsed.credits[0].granted_at, 1_782_518_759);
+  assert.equal(parsed.credits[0].expires_at, 4_088_793_959);
+});
+
+test("normalizeResetCreditsPayload clears nearest expiry when no credit is available", () => {
+  const credits = normalizeResetCreditsPayload({
+    available_count: 0,
+    credits: [
+      {
+        status: "expired",
+        title: "Old reset",
+        granted_at: "2026-01-01T00:00:00.000Z",
+        expires_at: "2026-02-01T00:00:00.000Z"
+      }
+    ]
+  });
+  assert.equal(credits.reset_credits_available_count, 0);
+  assert.equal(credits.reset_credits_next_expires_at, 0);
 });

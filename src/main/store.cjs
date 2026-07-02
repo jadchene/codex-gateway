@@ -65,6 +65,9 @@ function migrate(db) {
       quota_5h_reset_at INTEGER,
       quota_7d_used_percent REAL NOT NULL DEFAULT 0,
       quota_7d_reset_at INTEGER,
+      reset_credits_available_count INTEGER NOT NULL DEFAULT 0,
+      reset_credits_next_expires_at INTEGER,
+      reset_credits_json TEXT,
       raw_usage_json TEXT,
       note TEXT,
       created_at INTEGER NOT NULL,
@@ -127,6 +130,9 @@ function migrate(db) {
   addColumnIfMissing(db, "request_logs", "reasoning_output_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "request_logs", "total_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "codex_sessions", "note", "TEXT");
+  addColumnIfMissing(db, "accounts", "reset_credits_available_count", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "accounts", "reset_credits_next_expires_at", "INTEGER");
+  addColumnIfMissing(db, "accounts", "reset_credits_json", "TEXT");
   const defaults = {
     gateway_host: "localhost",
     gateway_port: "8436",
@@ -193,11 +199,13 @@ function saveAccount(db, input) {
     INSERT INTO accounts (
       id, name, email, id_token, access_token, refresh_token, last_refresh, account_id, workspace_id, status, enabled, priority,
       subscription_plan, subscription_expires_at, quota_5h_used_percent, quota_5h_reset_at,
-      quota_7d_used_percent, quota_7d_reset_at, raw_usage_json, note, created_at, updated_at
+      quota_7d_used_percent, quota_7d_reset_at, reset_credits_available_count, reset_credits_next_expires_at,
+      reset_credits_json, raw_usage_json, note, created_at, updated_at
     ) VALUES (
       @id, @name, @email, @id_token, @access_token, @refresh_token, @last_refresh, @account_id, @workspace_id, @status, @enabled, @priority,
       @subscription_plan, @subscription_expires_at, @quota_5h_used_percent, @quota_5h_reset_at,
-      @quota_7d_used_percent, @quota_7d_reset_at, @raw_usage_json, @note, @created_at, @updated_at
+      @quota_7d_used_percent, @quota_7d_reset_at, @reset_credits_available_count, @reset_credits_next_expires_at,
+      @reset_credits_json, @raw_usage_json, @note, @created_at, @updated_at
     )
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
@@ -217,6 +225,9 @@ function saveAccount(db, input) {
       quota_5h_reset_at = excluded.quota_5h_reset_at,
       quota_7d_used_percent = excluded.quota_7d_used_percent,
       quota_7d_reset_at = excluded.quota_7d_reset_at,
+      reset_credits_available_count = excluded.reset_credits_available_count,
+      reset_credits_next_expires_at = excluded.reset_credits_next_expires_at,
+      reset_credits_json = excluded.reset_credits_json,
       raw_usage_json = excluded.raw_usage_json,
       note = excluded.note,
       updated_at = excluded.updated_at
@@ -244,6 +255,9 @@ function normalizeAccount(input) {
     quota_5h_reset_at: input.quota_5h_reset_at || null,
     quota_7d_used_percent: Number(input.quota_7d_used_percent || 0),
     quota_7d_reset_at: input.quota_7d_reset_at || null,
+    reset_credits_available_count: Number(input.reset_credits_available_count || 0),
+    reset_credits_next_expires_at: input.reset_credits_next_expires_at || null,
+    reset_credits_json: input.reset_credits_json || null,
     raw_usage_json: input.raw_usage_json || null,
     note: input.note || null,
     created_at: input.created_at,
@@ -257,6 +271,9 @@ function updateUsage(db, id, usage) {
     quota_5h_reset_at: null,
     quota_7d_used_percent: null,
     quota_7d_reset_at: null,
+    reset_credits_available_count: null,
+    reset_credits_next_expires_at: null,
+    reset_credits_json: null,
     raw_usage_json: null,
     ...usage,
     id,
@@ -268,6 +285,9 @@ function updateUsage(db, id, usage) {
       quota_5h_reset_at = COALESCE(@quota_5h_reset_at, quota_5h_reset_at),
       quota_7d_used_percent = COALESCE(@quota_7d_used_percent, quota_7d_used_percent),
       quota_7d_reset_at = COALESCE(@quota_7d_reset_at, quota_7d_reset_at),
+      reset_credits_available_count = COALESCE(@reset_credits_available_count, reset_credits_available_count),
+      reset_credits_next_expires_at = COALESCE(@reset_credits_next_expires_at, reset_credits_next_expires_at),
+      reset_credits_json = COALESCE(@reset_credits_json, reset_credits_json),
       raw_usage_json = COALESCE(@raw_usage_json, raw_usage_json),
       updated_at = @updated_at
     WHERE id = @id
