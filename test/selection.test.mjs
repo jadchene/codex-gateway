@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { pickGatewayAccount, quotaWindowExhausted, resetSelectionState, usageScore } = require("../src/main/selection.cjs");
+const { createGatewayRouting, sessionIdFromHeaders, turnIdFromHeaders } = require("../src/main/gateway-routing.cjs");
 const { buildAuthorizeUrl } = require("../src/main/auth.cjs");
 const { gatewayProviderBlock, insertProviderBlockIntoConfig, replaceGatewayProviderBlock } = require("../src/main/codex-cli-auth.cjs");
 const { buildMcpGatewayCommand, mcpGatewayPath, mcpGatewayUrl } = require("../src/main/mcp-gateway-service.cjs");
@@ -13,6 +14,7 @@ const {
   buildUpstreamHeaders,
   buildUpstreamUrl,
   callWithFailover,
+  createSseUsageParser,
   dailyRebalanceDateKey,
   extractTokenUsage,
   isAuthExpiredResponse,
@@ -185,7 +187,13 @@ test("buildUpstreamHeaders sends Codex account auth headers", () => {
       "openai-project": "proj_client",
       origin: "http://127.0.0.1:8436",
       referer: "http://127.0.0.1:8436/",
-      "accept-encoding": "gzip"
+      "accept-encoding": "gzip",
+      connection: "keep-alive, x-local-hop",
+      "keep-alive": "timeout=5",
+      "x-local-hop": "secret",
+      te: "trailers",
+      trailer: "x-checksum",
+      upgrade: "h2c"
     },
     { access_token: "upstream-token", account_id: "acc_123" },
     true,
@@ -208,6 +216,12 @@ test("buildUpstreamHeaders sends Codex account auth headers", () => {
   assert.equal(headers.origin, undefined);
   assert.equal(headers.referer, undefined);
   assert.equal(headers["accept-encoding"], undefined);
+  assert.equal(headers.connection, undefined);
+  assert.equal(headers["keep-alive"], undefined);
+  assert.equal(headers["x-local-hop"], undefined);
+  assert.equal(headers.te, undefined);
+  assert.equal(headers.trailer, undefined);
+  assert.equal(headers.upgrade, undefined);
 });
 
 test("buildUpstreamHeaders only replaces local auth and account headers", () => {
@@ -368,6 +382,7 @@ test("callWithFailover stores quota headers and switches current account after e
     { id: "second", enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 10, quota_7d_used_percent: 20 }
   ];
   const savedSettings = [];
+  const selectedAccounts = [];
   let refreshAllCalled = false;
   let fetchCount = 0;
   globalThis.fetch = async () => {
@@ -403,18 +418,20 @@ test("callWithFailover stores quota headers and switches current account after e
         refreshAllUsage: async () => {
           refreshAllCalled = true;
         }
-      }
+      },
+      { onAccountSelected: (account) => selectedAccounts.push(account.id) }
     );
     assert.equal(result.account.id, "second");
     assert.equal(accounts[0].quota_5h_used_percent, 100);
     assert.equal(savedSettings.at(-1).gateway_current_account_id, "second");
     assert.equal(refreshAllCalled, false);
+    assert.deepEqual(selectedAccounts, ["first", "second"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("callWithFailover marks no-header quota failures exhausted without saving a failed account", async () => {
+test("callWithFailover keeps authoritative quota values when quota headers are missing", async () => {
   const originalFetch = globalThis.fetch;
   const accounts = [
     { id: "first", enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 50 },
@@ -440,12 +457,167 @@ test("callWithFailover marks no-header quota failures exhausted without saving a
       {}
     );
     assert.equal(result.account.id, "second");
-    assert.equal(accounts[0].quota_5h_used_percent, 100);
-    assert.equal(accounts[1].quota_5h_used_percent, 100);
+    assert.equal(accounts[0].quota_5h_used_percent, 50);
+    assert.equal(accounts[1].quota_5h_used_percent, 10);
     assert.equal(savedSettings.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("callWithFailover cools a no-header quota account and schedules usage refresh", async () => {
+  const originalFetch = globalThis.fetch;
+  const accounts = [
+    { id: "first", enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 50 },
+    { id: "second", enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 10 }
+  ];
+  const routing = createGatewayRouting();
+  let fetchCount = 0;
+  let refreshReason = "";
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    return fetchCount === 1
+      ? new Response("quota exceeded", { status: 429 })
+      : new Response("{}", { status: 200 });
+  };
+  try {
+    const result = await callWithFailover(
+      { method: "POST", headers: {} },
+      { upstreamUrl: "https://example.test/responses", path: "/v1/responses", body: Buffer.from("{}") },
+      accounts[0],
+      { gateway_quota_cooldown_ms: 60_000 },
+      {
+        listAccounts: () => accounts,
+        saveSettings: () => {},
+        addAppLog: () => {},
+        updateUsage: () => {}
+      },
+      {
+        async refreshAllUsage(reason) {
+          refreshReason = reason;
+          return [{ id: "first", ok: false }];
+        }
+      },
+      { routing }
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(result.account.id, "second");
+    assert.equal(refreshReason, "gateway-quota-without-headers");
+    assert.ok(routing.cooldowns.get("first") > Date.now());
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("quotaWindowExhausted makes a reset quota window usable again", () => {
+  assert.equal(quotaWindowExhausted({ quota_5h_used_percent: 100, quota_5h_reset_at: 900 }, 1_000), false);
+  assert.equal(quotaWindowExhausted({ quota_5h_used_percent: 100, quota_5h_reset_at: 1_100 }, 1_000), true);
+});
+
+test("gateway routing keeps session preference while turn affinity remains strict", () => {
+  let now = 1_000;
+  const routing = createGatewayRouting({ now: () => now });
+  const accounts = [
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_5h_used_percent: 10 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_5h_used_percent: 20 }
+  ];
+  const first = routing.context({ session_id: "session-1", "x-codex-turn-metadata": '{"turn_id":"turn-1"}' });
+  assert.equal(first.established, false);
+  routing.observeResponse(first, accounts[0], new Headers({ "x-codex-turn-state": "state-a" }));
+
+  now += 1;
+  const sameTurn = routing.context({ session_id: "session-1", "x-codex-turn-state": "state-a" });
+  assert.equal(sameTurn.established, true);
+  assert.equal(routing.findBoundAccount(sameTurn, accounts).id, "a");
+
+  const nextTurn = routing.context({ session_id: "session-1", "x-codex-turn-metadata": '{"turn_id":"turn-2"}' });
+  assert.equal(nextTurn.established, false);
+  assert.equal(nextTurn.sessionPreferred, true);
+  assert.equal(routing.findPreferredAccount(nextTurn, accounts).id, "a");
+});
+
+test("gateway routing changes a session preference only after the preferred account is unavailable", () => {
+  const routing = createGatewayRouting({ now: () => 10_000 });
+  const accounts = [
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_5h_used_percent: 10 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_5h_used_percent: 20 }
+  ];
+  const first = routing.context({ session_id: "session-1" });
+  routing.observeResponse(first, accounts[0], new Headers());
+  routing.setCooldown("a", 60_000);
+
+  const next = routing.context({ session_id: "session-1" });
+  assert.equal(routing.findPreferredAccount(next, accounts), null);
+  assert.equal(routing.selectNewAccount(accounts).id, "b");
+  routing.observeResponse(next, accounts[1], new Headers());
+  routing.clearCooldown("a");
+
+  const later = routing.context({ session_id: "session-1" });
+  assert.equal(routing.findPreferredAccount(later, accounts).id, "b");
+});
+
+test("gateway routing balances only newly seen sessions", () => {
+  const routing = createGatewayRouting({ now: () => 10_000 });
+  const accounts = [
+    { id: "a", enabled: true, status: "active", access_token: "token-a", quota_5h_used_percent: 10 },
+    { id: "b", enabled: true, status: "active", access_token: "token-b", quota_5h_used_percent: 20 }
+  ];
+  const firstSession = routing.context({ session_id: "session-1" });
+  routing.observeResponse(firstSession, accounts[0], new Headers());
+  assert.equal(routing.selectNewAccount(accounts).id, "b");
+
+  const sameSession = routing.context({ session_id: "session-1" });
+  assert.equal(routing.findPreferredAccount(sameSession, accounts).id, "a");
+});
+
+test("routing header parsers read Codex session and turn identifiers", () => {
+  assert.equal(sessionIdFromHeaders({ session_id: "session-1" }), "session-1");
+  assert.equal(sessionIdFromHeaders({ "x-session-id": "realtime-session" }), "realtime-session");
+  assert.equal(turnIdFromHeaders({ "x-codex-turn-metadata": '{"turn_id":"turn-1"}' }), "turn-1");
+  assert.equal(turnIdFromHeaders({ "x-codex-turn-metadata": "invalid" }), "");
+});
+
+test("gateway routing snapshot preserves session and turn affinity across restart", () => {
+  let savedSnapshot = null;
+  const first = createGatewayRouting({
+    now: () => 10_000,
+    onChanged(snapshot) {
+      savedSnapshot = snapshot;
+    }
+  });
+  const route = first.context({
+    session_id: "session-1",
+    "x-codex-turn-metadata": '{"turn_id":"turn-1"}'
+  });
+  first.observeResponse(route, { id: "a" }, new Headers({ "x-codex-turn-state": "state-a" }));
+
+  const restored = createGatewayRouting({ now: () => 10_001, snapshot: savedSnapshot });
+  const restoredTurn = restored.context({ session_id: "session-1", "x-codex-turn-state": "state-a" });
+  assert.equal(restoredTurn.established, true);
+  assert.equal(restoredTurn.accountId, "a");
+
+  const unknown = createGatewayRouting({ now: () => 10_001 }).context({ "x-codex-turn-state": "unknown-state" });
+  assert.equal(unknown.unknownTurnState, true);
+});
+
+test("gateway routing bounds affinity maps while retaining recently used bindings", () => {
+  let now = 10_000;
+  const routing = createGatewayRouting({ now: () => now });
+  for (let index = 0; index < 500; index += 1) {
+    const route = routing.context({ session_id: `session-${index}` });
+    routing.observeResponse(route, { id: "a" }, new Headers());
+    now += 1;
+  }
+  routing.context({ session_id: "session-0" });
+  now += 1;
+  const newest = routing.context({ session_id: "session-500" });
+  routing.observeResponse(newest, { id: "b" }, new Headers());
+
+  const sessions = routing.snapshot().sessions;
+  assert.equal(sessions.length, 500);
+  assert.equal(sessions.some((item) => item.key === "session-0"), true);
+  assert.equal(sessions.some((item) => item.key === "session-1"), false);
+  assert.equal(sessions.some((item) => item.key === "session-500"), true);
 });
 
 test("callWithFailover returns the last attempted account when all accounts fail", async () => {
@@ -530,6 +702,14 @@ test("matchGatewayRoute validates both path and method", () => {
     methodAllowed: false,
     allowedMethods: []
   });
+  for (const path of [
+    "/v1/memories/trace_summarize",
+    "/v1/images/generations",
+    "/v1/images/edits",
+    "/v1/realtime/calls"
+  ]) {
+    assert.equal(matchGatewayRoute("POST", path).methodAllowed, true);
+  }
 });
 
 test("extractTokenUsage uses latest SSE usage instead of summing cumulative events", () => {
@@ -584,7 +764,20 @@ test("gatewayProviderBlock uses OpenAI provider name for compact support", () =>
   const block = gatewayProviderBlock({ gateway_host: "localhost", gateway_port: "8436" });
   assert.match(block, /name = "OpenAI"/);
   assert.match(block, /wire_api = "responses"/);
-  assert.match(block, /supports_websockets = false/);
+  assert.match(block, /supports_websockets = true/);
+});
+
+test("incremental SSE usage parser handles split and oversized completed events", () => {
+  const parser = createSseUsageParser();
+  parser.feed(Buffer.from(`data: {"type":"response.completed","output":"${"x".repeat(1_100_000)}`));
+  parser.feed(Buffer.from('","response":{"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}}\n\n'));
+  assert.deepEqual(parser.latestUsage(), {
+    input_tokens: 12,
+    cached_input_tokens: 0,
+    output_tokens: 3,
+    reasoning_output_tokens: 0,
+    total_tokens: 15
+  });
 });
 
 test("gatewayProviderBlock writes localhost base URL for wildcard listener", () => {

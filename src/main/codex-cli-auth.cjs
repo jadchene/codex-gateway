@@ -85,7 +85,7 @@ function gatewayProviderBlock(settings) {
     'name = "OpenAI"',
     `base_url = "http://${host}:${port}/v1"`,
     'wire_api = "responses"',
-    "supports_websockets = false",
+    "supports_websockets = true",
     ""
   ].join("\n");
 }

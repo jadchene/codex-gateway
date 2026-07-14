@@ -55,6 +55,12 @@ http://127.0.0.1:8435
 - `GET /v1/models`
 - `POST /v1/responses`
 - `POST /v1/responses/compact`
+- `POST /v1/memories/trace_summarize`
+- `POST /v1/images/generations`
+- `POST /v1/images/edits`
+- `POST /v1/realtime/calls`
+- `WS /v1/responses`
+- `WS /v1/realtime`（包括携带 `call_id` 的 Realtime sideband 连接）
 
 默认本地配置：
 
@@ -62,10 +68,14 @@ http://127.0.0.1:8435
 host: localhost
 port: 8436
 base URL: http://localhost:8436/v1
-API key: local-personal-token
+API key: 首次运行时随机生成
 ```
 
-API key、监听 host 和端口可以在应用设置中修改。网关会把请求转发到配置的上游 Codex 后端，只替换上游 `Authorization` 和 `ChatGPT-Account-ID` 请求头。不支持图片接口。
+API key、监听 host、端口、HTTP 请求体限制、WebSocket 消息/缓冲限制，以及连接/流式/普通请求/WebSocket 响应空闲超时都可以在应用设置中修改。网关会把请求转发到配置的上游 Codex 后端，替换上游 `Authorization` 和 `ChatGPT-Account-ID`，保留 Codex 应用元数据，并移除逐跳、Cookie 和客户端凭据请求头。
+
+账号路由采用 Session 软亲和与 Turn 强亲和。同一 Codex session 的多个 turn 会优先使用原账号；账号额度耗尽或临时不可用后，下一个尚未绑定的 turn 或新的 WebSocket 握手可以切换账号，并更新该 session 的首选账号。已经携带 `x-codex-turn-state` 的进行中 turn，以及已经建立的 WebSocket 连接，都不会在中途切换账号。客户端断开时会取消上游请求或连接；网关停机时会先取消活动流量，并在配置的宽限期结束后强制关闭残留连接。
+
+Responses WebSocket 与 Realtime/sideband WebSocket 均可代理。网关会在客户端侧和上游侧分别协商压缩，保留 Codex 应用请求头与握手元数据，带背压地双向转发文本和二进制消息，传递关闭语义，并记录 WebSocket 响应事件中的 token 用量。
 
 ## Codex CLI 认证模式
 
@@ -83,9 +93,14 @@ model_provider = "codex_gateway"
 name = "OpenAI"
 base_url = "http://localhost:8436/v1"
 wire_api = "responses"
+supports_websockets = true
 ```
 
 当监听 host 是 `0.0.0.0` 时，生成的 provider URL 仍使用 `localhost`，方便 Codex CLI 连接本地服务。
+
+生成的 provider 默认启用 Responses WebSocket。手工设置 `supports_websockets = false` 后，现有 HTTP/SSE Responses、compact、models、图片和 Realtime call HTTP 路由仍然可用；它只会阻止 Codex CLI 为该 provider 选择 Responses-over-WebSocket。
+
+不要在 API Key 为空或仍是默认值时，把网关监听到 `0.0.0.0` 或其他非回环地址。非回环监听会让允许访问该网络的设备获得账号代理模型的能力；请先在设置中生成随机 Key，并限制主机防火墙的访问范围。
 
 ## MCP Gateway 控制
 

@@ -746,6 +746,9 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
         <ControlledField name="gateway_host" label="监听地址" value={draft.gateway_host} onChange={setField} />
         <ControlledField name="gateway_port" label="端口" value={draft.gateway_port} type="number" onChange={setField} />
       </div>
+      {!isLoopbackHost(draft.gateway_host) && (
+        <div className="muted">当前监听地址会向本机外部开放账号代理能力。请使用随机 API Key，并确认防火墙访问范围。</div>
+      )}
       <label className="field">
         <span>本地 API Key</span>
         <div className="input-actions">
@@ -761,7 +764,25 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
         </div>
       </label>
       <ControlledField name="upstream_base_url" label="上游地址" value={draft.upstream_base_url} onChange={setField} />
-      <ControlledField name="request_timeout_ms" label="请求超时 ms（0 为不限制）" value={draft.request_timeout_ms} type="number" onChange={setField} />
+      <div className="split split-three">
+        <ControlledField name="gateway_connect_timeout_ms" label="上游连接超时 ms" value={draft.gateway_connect_timeout_ms} type="number" onChange={setField} />
+        <ControlledField name="gateway_stream_idle_timeout_ms" label="流式空闲超时 ms" value={draft.gateway_stream_idle_timeout_ms} type="number" onChange={setField} />
+        <ControlledField name="gateway_unary_timeout_ms" label="普通请求总超时 ms" value={draft.gateway_unary_timeout_ms} type="number" onChange={setField} />
+      </div>
+      <div className="split split-three">
+        <ControlledField name="gateway_request_body_limit_bytes" label="请求体上限 bytes" value={draft.gateway_request_body_limit_bytes} type="number" onChange={setField} />
+        <ControlledField name="gateway_error_body_limit_bytes" label="错误响应上限 bytes" value={draft.gateway_error_body_limit_bytes} type="number" onChange={setField} />
+        <ControlledField name="gateway_max_concurrent_requests" label="最大并发请求数" value={draft.gateway_max_concurrent_requests} type="number" onChange={setField} />
+      </div>
+      <div className="split split-three">
+        <ControlledField name="gateway_websocket_max_payload_bytes" label="WS 单消息上限 bytes" value={draft.gateway_websocket_max_payload_bytes} type="number" onChange={setField} />
+        <ControlledField name="gateway_websocket_buffer_high_water_bytes" label="WS 转发缓冲高水位 bytes" value={draft.gateway_websocket_buffer_high_water_bytes} type="number" onChange={setField} />
+        <ControlledField name="gateway_websocket_idle_timeout_ms" label="WS 响应空闲超时 ms" value={draft.gateway_websocket_idle_timeout_ms} type="number" onChange={setField} />
+      </div>
+      <div className="split">
+        <ControlledField name="gateway_quota_cooldown_ms" label="未知额度冷却 ms" value={draft.gateway_quota_cooldown_ms} type="number" onChange={setField} />
+        <ControlledField name="gateway_shutdown_grace_ms" label="网关停机宽限 ms" value={draft.gateway_shutdown_grace_ms} type="number" onChange={setField} />
+      </div>
       <ControlledField name="usage_refresh_interval_secs" label="账号额度定时刷新间隔（秒，0 为关闭）" value={draft.usage_refresh_interval_secs} type="number" onChange={setField} />
       <div className="split split-three">
         <ControlledField name="billing_uncached_input_factor" label="输入(未命中)计费系数" value={draft.billing_uncached_input_factor} type="number" step="any" onChange={setField} />
@@ -1522,7 +1543,7 @@ function providerToml(settings) {
     'name = "OpenAI"',
     `base_url = "http://${host}:${port}/v1"`,
     'wire_api = "responses"',
-    "supports_websockets = false"
+    "supports_websockets = true"
   ].join("\n");
 }
 
@@ -1530,6 +1551,11 @@ function gatewayProviderBaseHost(host) {
   const value = String(host || "").trim();
   if (!value || value === "0.0.0.0") return "localhost";
   return value;
+}
+
+function isLoopbackHost(host) {
+  const value = String(host || "").trim().toLowerCase();
+  return value === "localhost" || value === "127.0.0.1" || value === "::1" || value === "[::1]";
 }
 
 function mcpGatewayBaseUrl(settings = {}) {

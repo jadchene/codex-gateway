@@ -136,9 +136,20 @@ function migrate(db) {
   const defaults = {
     gateway_host: "localhost",
     gateway_port: "8436",
-    gateway_api_key: "local-personal-token",
+    gateway_api_key: randomGatewayApiKey(),
     upstream_base_url: "https://chatgpt.com/backend-api/codex",
     request_timeout_ms: "0",
+    gateway_connect_timeout_ms: "30000",
+    gateway_stream_idle_timeout_ms: "120000",
+    gateway_unary_timeout_ms: "300000",
+    gateway_shutdown_grace_ms: "2000",
+    gateway_request_body_limit_bytes: "67108864",
+    gateway_error_body_limit_bytes: "1048576",
+    gateway_max_concurrent_requests: "16",
+    gateway_websocket_max_payload_bytes: "134217728",
+    gateway_websocket_buffer_high_water_bytes: "4194304",
+    gateway_websocket_idle_timeout_ms: "120000",
+    gateway_quota_cooldown_ms: "60000",
     usage_refresh_interval_secs: "900",
     last_usage_refresh_all_at: "0",
     auto_start_gateway: "false",
@@ -155,6 +166,7 @@ function migrate(db) {
     codex_selected_account_id: "",
     gateway_current_account_id: "",
     gateway_last_daily_rebalance_date: "",
+    gateway_affinity_state_json: "{}",
     billing_uncached_input_factor: "125",
     billing_cached_input_factor: "12.5",
     billing_output_factor: "750"
@@ -164,6 +176,10 @@ function migrate(db) {
   fillBlankSetting(db, "mcp_gateway_host", "127.0.0.1");
   fillBlankSetting(db, "mcp_gateway_port", "3000");
   fillBlankSetting(db, "mcp_gateway_path", "/mcp");
+}
+
+function randomGatewayApiKey() {
+  return `sk-${crypto.randomBytes(24).toString("base64url")}`;
 }
 
 function getSettings(db) {

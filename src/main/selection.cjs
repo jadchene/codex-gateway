@@ -1,16 +1,21 @@
-function usableAccount(account) {
+function usableAccount(account, nowSeconds = Math.floor(Date.now() / 1000)) {
   return account
     && account.enabled
     && account.status !== "disabled"
     && account.access_token
-    && !quotaWindowExhausted(account);
+    && !quotaWindowExhausted(account, nowSeconds);
 }
 
-function quotaWindowExhausted(account) {
-  return [account.quota_5h_used_percent, account.quota_7d_used_percent]
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value))
-    .some((value) => value >= 99.9);
+function quotaWindowExhausted(account, nowSeconds = Math.floor(Date.now() / 1000)) {
+  return [
+    [account.quota_5h_used_percent, account.quota_5h_reset_at],
+    [account.quota_7d_used_percent, account.quota_7d_reset_at]
+  ].some(([usedValue, resetValue]) => {
+    const used = Number(usedValue);
+    if (!Number.isFinite(used) || used < 99.9) return false;
+    const resetAt = Number(resetValue);
+    return !Number.isFinite(resetAt) || resetAt <= 0 || resetAt > nowSeconds;
+  });
 }
 
 function usageScore(account) {
@@ -47,6 +52,29 @@ function pickGatewayAccount(accounts, currentAccountId = "", excludeIds = [], op
   const picked = pickNextAccount(ordered);
   if (picked) lastSelectedAccountId = picked.id;
   return picked;
+}
+
+function pickBalancedGatewayAccount(accounts, excludeIds = [], options = {}) {
+  const excluded = new Set(excludeIds);
+  const nowMs = Number(options.nowMs || Date.now());
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const activeTurns = options.activeTurns || new Map();
+  const cooldowns = options.cooldowns || new Map();
+  const candidates = accounts
+    .map((account, index) => ({ account, index }))
+    .filter(({ account }) => usableAccount(account, nowSeconds))
+    .filter(({ account }) => !excluded.has(account.id))
+    .filter(({ account }) => Number(cooldowns.get(account.id) || 0) <= nowMs)
+    .sort((left, right) => {
+      const activeDiff = Number(activeTurns.get(left.account.id) || 0) - Number(activeTurns.get(right.account.id) || 0);
+      if (activeDiff !== 0) return activeDiff;
+      const usageDiff = usageScore(left.account) - usageScore(right.account);
+      if (usageDiff !== 0) return usageDiff;
+      const priorityDiff = Number(left.account.priority || 100) - Number(right.account.priority || 100);
+      if (priorityDiff !== 0) return priorityDiff;
+      return left.index - right.index;
+    });
+  return candidates.at(0)?.account || null;
 }
 
 function sortAccounts(accounts) {
@@ -88,7 +116,9 @@ function resetSelectionState() {
 
 module.exports = {
   pickGatewayAccount,
+  pickBalancedGatewayAccount,
   usageScore,
   quotaWindowExhausted,
+  usableAccount,
   resetSelectionState
 };

@@ -55,6 +55,12 @@ The built-in gateway exposes a small OpenAI-compatible local surface:
 - `GET /v1/models`
 - `POST /v1/responses`
 - `POST /v1/responses/compact`
+- `POST /v1/memories/trace_summarize`
+- `POST /v1/images/generations`
+- `POST /v1/images/edits`
+- `POST /v1/realtime/calls`
+- `WS /v1/responses`
+- `WS /v1/realtime` (including Realtime sideband `call_id` connections)
 
 Default local settings:
 
@@ -62,10 +68,14 @@ Default local settings:
 host: localhost
 port: 8436
 base URL: http://localhost:8436/v1
-API key: local-personal-token
+API key: randomly generated on first run
 ```
 
-The API key, host, and port can be changed in the app settings. The gateway forwards requests to the configured upstream Codex backend and replaces only the upstream `Authorization` and `ChatGPT-Account-ID` headers. Image endpoints are not supported.
+The API key, host, port, HTTP body limits, WebSocket message/buffer limits, and connection/stream/unary/WebSocket idle timeouts can be changed in the app settings. The gateway forwards requests to the configured upstream Codex backend, replaces upstream `Authorization` and `ChatGPT-Account-ID`, preserves Codex application metadata, and removes hop-by-hop, cookie, and client credential headers.
+
+Account routing uses soft session affinity and strict turn affinity. A Codex session keeps its preferred account across turns. When that account is exhausted or temporarily unavailable, the next unbound turn or a new WebSocket handshake can fail over and update the session preference. Requests carrying an established `x-codex-turn-state` and established WebSocket connections never move to another account. Client disconnects cancel the upstream request or socket, and gateway shutdown aborts active traffic before forcing any remaining sockets closed after the configured grace period.
+
+Responses WebSocket transport and Realtime/sideband WebSocket transport are both proxied. The gateway negotiates compression independently on each side, preserves Codex application headers and handshake metadata, forwards text and binary messages in both directions with backpressure, propagates close semantics, and records usage found in WebSocket response events.
 
 ## Codex CLI Auth Modes
 
@@ -83,9 +93,14 @@ model_provider = "codex_gateway"
 name = "OpenAI"
 base_url = "http://localhost:8436/v1"
 wire_api = "responses"
+supports_websockets = true
 ```
 
 When the listener host is `0.0.0.0`, the generated provider URL still uses `localhost` so the Codex CLI can connect to the local service.
+
+The generated provider enables Responses WebSocket transport. Setting `supports_websockets = false` manually keeps the existing HTTP/SSE Responses, compact, models, image, and Realtime-call HTTP routes available; it only prevents Codex CLI from selecting Responses-over-WebSocket for this provider.
+
+Do not expose the gateway on `0.0.0.0` or another non-loopback address with a blank or default API key. A non-loopback listener makes account-backed model access reachable from the permitted network; generate a random key in Settings and restrict the host firewall first.
 
 ## MCP Gateway Control
 
