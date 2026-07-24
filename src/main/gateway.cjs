@@ -50,6 +50,7 @@ function createGateway(store, authService, hooks = {}) {
         buildUpstreamUrl,
         buildUpstreamHeaders,
         buildCodexQuotaHeaders,
+        buildCodexQuotaSnapshot,
         syncAccountUsageFromHeaders,
         isQuotaExhaustedResponse,
         isAuthExpiredResponse,
@@ -620,28 +621,64 @@ function buildCodexQuotaHeaders(accounts, nowSeconds = Math.floor(Date.now() / 1
 }
 
 function buildCodexQuotaHeaderDetail(accounts, nowSeconds = Math.floor(Date.now() / 1000)) {
+  const detail = buildCodexQuotaSnapshotDetail(accounts, nowSeconds);
+  const { snapshot, primary, secondary } = detail;
+  const headers = {
+    "x-codex-primary-used-percent": formatHeaderNumber(snapshot.primary.used_percent),
+    "x-codex-primary-window-minutes": String(snapshot.primary.window_minutes),
+    "x-codex-primary-reset-after-seconds": String(snapshot.primary.reset_after_seconds),
+    "x-codex-secondary-used-percent": formatHeaderNumber(snapshot.secondary.used_percent),
+    "x-codex-secondary-window-minutes": String(snapshot.secondary.window_minutes),
+    "x-codex-secondary-reset-after-seconds": String(snapshot.secondary.reset_after_seconds),
+    "x-codex-plan-type": snapshot.plan_type,
+    "x-codex-active-limit": snapshot.active_limit,
+    "x-codex-credits-balance": String(snapshot.credits.balance),
+    "x-codex-credits-has-credits": String(snapshot.credits.has_credits),
+    "x-codex-credits-unlimited": String(snapshot.credits.unlimited)
+  };
+  return {
+    headers,
+    nowSeconds,
+    accountCount: detail.accountCount,
+    primary,
+    secondary
+  };
+}
+
+function buildCodexQuotaSnapshot(accounts, nowSeconds = Math.floor(Date.now() / 1000)) {
+  return buildCodexQuotaSnapshotDetail(accounts, nowSeconds).snapshot;
+}
+
+function buildCodexQuotaSnapshotDetail(accounts, nowSeconds) {
   const pool = accounts.filter((account) => account
     && account.enabled
     && account.status !== "disabled"
     && account.access_token);
   const primary = resetAfterSeconds(pool, "quota_5h_reset_at", nowSeconds);
   const secondary = resetAfterSeconds(pool, "quota_7d_reset_at", nowSeconds);
-  const headers = {
-    "x-codex-primary-used-percent": formatHeaderNumber(remainingPercent(pool, "quota_5h_used_percent")),
-    "x-codex-primary-window-minutes": "300",
-    "x-codex-primary-reset-after-seconds": String(primary.value),
-    "x-codex-secondary-used-percent": formatHeaderNumber(remainingPercent(pool, "quota_7d_used_percent")),
-    "x-codex-secondary-window-minutes": "10080",
-    "x-codex-secondary-reset-after-seconds": String(secondary.value),
-    "x-codex-plan-type": "unknown",
-    "x-codex-active-limit": "primary",
-    "x-codex-credits-balance": "0",
-    "x-codex-credits-has-credits": "false",
-    "x-codex-credits-unlimited": "false"
+  const snapshot = {
+    primary: {
+      used_percent: roundHeaderPercent(remainingPercent(pool, "quota_5h_used_percent")),
+      window_minutes: 300,
+      reset_after_seconds: primary.value,
+      reset_at: primary.selected?.reset_at || 0
+    },
+    secondary: {
+      used_percent: roundHeaderPercent(remainingPercent(pool, "quota_7d_used_percent")),
+      window_minutes: 10080,
+      reset_after_seconds: secondary.value,
+      reset_at: secondary.selected?.reset_at || 0
+    },
+    plan_type: "unknown",
+    active_limit: "primary",
+    credits: {
+      balance: 0,
+      has_credits: false,
+      unlimited: false
+    }
   };
   return {
-    headers,
-    nowSeconds,
+    snapshot,
     accountCount: pool.length,
     primary,
     secondary
@@ -683,8 +720,12 @@ function clampPercent(value) {
 }
 
 function formatHeaderNumber(value) {
-  const rounded = Math.round(clampPercent(value) * 10) / 10;
+  const rounded = roundHeaderPercent(value);
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function roundHeaderPercent(value) {
+  return Math.round(clampPercent(value) * 10) / 10;
 }
 
 function isQuotaExhaustedResponse(status, body) {
@@ -1025,6 +1066,7 @@ module.exports = {
   matchGatewayRoute,
   buildCodexQuotaHeaders,
   buildCodexQuotaHeaderDetail,
+  buildCodexQuotaSnapshot,
   callWithFailover,
   selectInitialGatewayAccount,
   dailyRebalanceDateKey,

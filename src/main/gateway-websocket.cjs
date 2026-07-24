@@ -142,7 +142,10 @@ function createGatewayWebSocketGateway(options) {
         controller,
         bufferHighWaterBytes: positiveSetting(settings.gateway_websocket_buffer_high_water_bytes, DEFAULT_BUFFER_HIGH_WATER_BYTES),
         onDownstreamMessage: observer.onDownstreamMessage,
-        onUpstreamMessage: observer.onUpstreamMessage
+        onUpstreamMessage(data, isBinary) {
+          observer.onUpstreamMessage(data, isBinary);
+          return rewriteUpstreamMessage(data, isBinary, settings, store, helpers);
+        }
       });
       controller.signal.addEventListener("abort", () => {
         const reason = controller.signal.reason;
@@ -360,6 +363,24 @@ function responseHeadersForClient(headers, settings, store, helpers) {
   return result;
 }
 
+function rewriteUpstreamMessage(data, isBinary, settings, store, helpers) {
+  if (isBinary || settings.codex_quota_headers_mode !== "rewrite") return data;
+  const event = parseJson(data);
+  if (event?.type !== "codex.rate_limits") return data;
+  return Buffer.from(JSON.stringify({
+    ...event,
+    rate_limits: helpers.buildCodexQuotaSnapshot(store.listAccounts())
+  }));
+}
+
+function parseJson(data) {
+  try {
+    return JSON.parse(Buffer.isBuffer(data) ? data.toString("utf8") : String(data));
+  } catch {
+    return null;
+  }
+}
+
 function parseProtocols(value) {
   return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
 }
@@ -491,5 +512,6 @@ module.exports = {
   createGatewayWebSocketGateway,
   buildUpstreamWebSocketHeaders,
   responseHeadersForClient,
+  rewriteUpstreamMessage,
   WEBSOCKET_ROUTES
 };

@@ -10,6 +10,7 @@ const { gatewayProviderBlock, insertProviderBlockIntoConfig, replaceGatewayProvi
 const { buildMcpGatewayCommand, mcpGatewayPath, mcpGatewayUrl } = require("../src/main/mcp-gateway-service.cjs");
 const {
   buildCodexQuotaHeaders,
+  buildCodexQuotaSnapshot,
   buildGatewayRequest,
   buildUpstreamHeaders,
   buildUpstreamUrl,
@@ -290,6 +291,25 @@ test("buildCodexQuotaHeaders rewrites quota headers from account pool", () => {
   assert.equal(headers["x-codex-credits-balance"], "0");
   assert.equal(headers["x-codex-credits-has-credits"], "false");
   assert.equal(headers["x-codex-credits-unlimited"], "false");
+});
+
+test("buildCodexQuotaSnapshot uses the same aggregate as response headers", () => {
+  const accounts = [
+    { enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 90.24, quota_5h_reset_at: 1_000, quota_7d_used_percent: 95, quota_7d_reset_at: 2_000 },
+    { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 80.4, quota_5h_reset_at: 1_500, quota_7d_used_percent: 70, quota_7d_reset_at: 2_500 }
+  ];
+  const headers = buildCodexQuotaHeaders(accounts, 500);
+  const snapshot = buildCodexQuotaSnapshot(accounts, 500);
+
+  assert.equal(snapshot.primary.used_percent, Number(headers["x-codex-primary-used-percent"]));
+  assert.equal(snapshot.primary.used_percent, 70.6);
+  assert.equal(snapshot.primary.window_minutes, Number(headers["x-codex-primary-window-minutes"]));
+  assert.equal(snapshot.primary.reset_after_seconds, Number(headers["x-codex-primary-reset-after-seconds"]));
+  assert.equal(snapshot.primary.reset_at, 1_000);
+  assert.equal(snapshot.secondary.used_percent, Number(headers["x-codex-secondary-used-percent"]));
+  assert.equal(snapshot.secondary.window_minutes, Number(headers["x-codex-secondary-window-minutes"]));
+  assert.equal(snapshot.secondary.reset_after_seconds, Number(headers["x-codex-secondary-reset-after-seconds"]));
+  assert.equal(snapshot.secondary.reset_at, 2_000);
 });
 
 test("buildCodexQuotaHeaders caps stacked remaining quota before subtraction", () => {

@@ -14,11 +14,12 @@ function bridgeWebSockets(options) {
   } = options;
   let closing = false;
 
-  const forward = (source, destination, observe) => (data, isBinary) => {
-    observe?.(data, isBinary);
+  const forward = (source, destination, transform) => (data, isBinary) => {
+    const replacement = transform?.(data, isBinary);
+    const outgoingData = replacement ?? data;
     if (destination.readyState !== WebSocket.OPEN) return;
     if (destination.bufferedAmount >= bufferHighWaterBytes) source.pause();
-    destination.send(data, { binary: isBinary }, (error) => {
+    destination.send(outgoingData, { binary: isBinary }, (error) => {
       if (source.isPaused && source.isPaused() && destination.bufferedAmount < bufferHighWaterBytes) source.resume();
       if (error) abortController(controller, "websocket_forward_error", error.message);
     });

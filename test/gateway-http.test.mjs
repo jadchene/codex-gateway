@@ -31,6 +31,29 @@ test("HTTP gateway streams SSE unchanged and preserves turn state", async () => 
   }
 });
 
+test("HTTP gateway rewrites account quota headers with the aggregate pool quota", async () => {
+  const harness = await startHarness((_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "x-codex-primary-used-percent": "90",
+      "x-codex-secondary-used-percent": "95"
+    });
+    res.end('data: {"type":"response.completed"}\n\n');
+  }, { codex_quota_headers_mode: "rewrite" });
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("session-rewrite-quota", "turn-rewrite-quota")
+    });
+    assert.equal(response.headers.get("x-codex-primary-used-percent"), "10");
+    assert.equal(response.headers.get("x-codex-secondary-used-percent"), "15");
+    assert.equal(await response.text(), 'data: {"type":"response.completed"}\n\n');
+    assert.equal(harness.accounts[0].quota_5h_used_percent, 90);
+    assert.equal(harness.accounts[0].quota_7d_used_percent, 95);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("HTTP gateway removes hop-by-hop, connection-nominated, and cookie response headers", async () => {
   const harness = await startHarness((_req, res) => {
     res.writeHead(200, {

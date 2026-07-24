@@ -4,8 +4,23 @@ import test from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 
 import gatewayModule from "../src/main/gateway.cjs";
+import gatewayWebSocketModule from "../src/main/gateway-websocket.cjs";
 
-const { createGateway } = gatewayModule;
+const { buildCodexQuotaSnapshot, createGateway } = gatewayModule;
+const { rewriteUpstreamMessage } = gatewayWebSocketModule;
+
+test("WebSocket quota rewriting leaves incompatible payloads unchanged", () => {
+  const text = Buffer.from("not-json");
+  const otherEvent = Buffer.from(JSON.stringify({ type: "response.output_text.delta", delta: "ok" }));
+  const rateLimitEvent = Buffer.from(JSON.stringify({ type: "codex.rate_limits", rate_limits: {} }));
+  const store = { listAccounts: () => [] };
+  const helpers = { buildCodexQuotaSnapshot };
+
+  assert.strictEqual(rewriteUpstreamMessage(rateLimitEvent, false, { codex_quota_headers_mode: "block" }, store, helpers), rateLimitEvent);
+  assert.strictEqual(rewriteUpstreamMessage(rateLimitEvent, true, { codex_quota_headers_mode: "rewrite" }, store, helpers), rateLimitEvent);
+  assert.strictEqual(rewriteUpstreamMessage(text, false, { codex_quota_headers_mode: "rewrite" }, store, helpers), text);
+  assert.strictEqual(rewriteUpstreamMessage(otherEvent, false, { codex_quota_headers_mode: "rewrite" }, store, helpers), otherEvent);
+});
 
 test("WebSocket gateway proxies compressed Responses messages and handshake metadata", async () => {
   const requests = [];
@@ -234,7 +249,10 @@ test("WebSocket rate-limit events update usage and quota errors affect only the 
     const first = await connectGateway(harness, "/v1/responses", { "session-id": "session-quota-event" });
     const messages = nextMessages(first.websocket, 2);
     first.websocket.send(JSON.stringify({ type: "response.create" }));
-    await messages;
+    const received = await messages;
+    const rateLimits = JSON.parse(received[0].toString());
+    assert.equal(rateLimits.rate_limits.primary.used_percent, 50);
+    assert.equal(rateLimits.rate_limits.secondary.used_percent, 25);
     assert.equal(first.websocket.readyState, WebSocket.OPEN);
     first.websocket.close();
     await nextClose(first.websocket);
@@ -245,6 +263,49 @@ test("WebSocket rate-limit events update usage and quota errors affect only the 
     second.websocket.close();
     await nextClose(second.websocket);
     assert.deepEqual(attempts, ["Bearer token-a", "Bearer token-b"]);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket rewrite stores the account event before forwarding the aggregate quota", async () => {
+  const rawEvent = {
+    type: "codex.rate_limits",
+    correlation_id: "rate-limit-1",
+    rate_limits: {
+      primary: { used_percent: 90, window_minutes: 300, reset_at: 2_000_000_000 },
+      secondary: { used_percent: 95, window_minutes: 10080, reset_at: 2_000_100_000 }
+    }
+  };
+  const harness = await startHarness({
+    onConnection(websocket) {
+      websocket.once("message", () => websocket.send(JSON.stringify(rawEvent)));
+    }
+  }, { codex_quota_headers_mode: "rewrite" });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "session-rewrite-quota" });
+    const message = nextMessage(websocket);
+    websocket.send(JSON.stringify({ type: "response.create" }));
+    const rewritten = JSON.parse((await message).toString());
+
+    assert.equal(rewritten.type, "codex.rate_limits");
+    assert.equal(rewritten.correlation_id, "rate-limit-1");
+    assert.equal(rewritten.rate_limits.primary.used_percent, 10);
+    assert.equal(rewritten.rate_limits.primary.window_minutes, 300);
+    assert.equal(rewritten.rate_limits.primary.reset_at, 2_000_000_000);
+    assert.equal(rewritten.rate_limits.secondary.used_percent, 15);
+    assert.equal(rewritten.rate_limits.secondary.window_minutes, 10080);
+    assert.equal(rewritten.rate_limits.secondary.reset_at, 2_000_100_000);
+    assert.deepEqual(rewritten.rate_limits.credits, { balance: 0, has_credits: false, unlimited: false });
+
+    assert.equal(harness.accounts[0].quota_5h_used_percent, 90);
+    assert.equal(harness.accounts[0].quota_7d_used_percent, 95);
+    const stored = JSON.parse(harness.accounts[0].raw_usage_json);
+    assert.equal(stored.event.rate_limits.primary.used_percent, 90);
+    assert.equal(stored.event.rate_limits.secondary.used_percent, 95);
+
+    websocket.close();
+    await nextClose(websocket);
   } finally {
     await harness.close();
   }
