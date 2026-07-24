@@ -1022,7 +1022,7 @@ table {
 
 .app-log-table th:nth-child(3),
 .app-log-table td:nth-child(3) {
-  width: 82px;
+  width: 132px;
 }
 
 .app-log-table th:nth-child(4),
@@ -1171,8 +1171,8 @@ td {
 }
 
 .app-log-table .scope-col {
-  width: 58px;
-  max-width: 58px;
+  width: 132px;
+  max-width: 132px;
   white-space: nowrap;
 }
 
