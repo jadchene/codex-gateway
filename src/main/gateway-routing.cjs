@@ -12,6 +12,9 @@ function createGatewayRouting(options = {}) {
   const sessionBindings = bindingMap(options.snapshot?.sessions);
   const cooldowns = new Map();
   const activeRequests = new Map();
+  const getIgnoreFiveHourLimit = typeof options.getIgnoreFiveHourLimit === "function"
+    ? options.getIgnoreFiveHourLimit
+    : () => options.ignoreFiveHourLimit === true;
 
   function context(headers = {}) {
     prune();
@@ -45,7 +48,7 @@ function createGatewayRouting(options = {}) {
     if (!routeContext?.accountId) return null;
     if (Number(cooldowns.get(routeContext.accountId) || 0) > now()) return null;
     return accounts.find((account) => account.id === routeContext.accountId
-      && usableAccount(account, Math.floor(now() / 1000))) || null;
+      && usableAccount(account, Math.floor(now() / 1000), { ignoreFiveHourLimit: getIgnoreFiveHourLimit() })) || null;
   }
 
   function selectNewAccount(accounts, excludedIds = []) {
@@ -53,7 +56,8 @@ function createGatewayRouting(options = {}) {
     return pickBalancedGatewayAccount(accounts, excludedIds, {
       nowMs: now(),
       activeTurns: loadCounts(),
-      cooldowns
+      cooldowns,
+      ignoreFiveHourLimit: getIgnoreFiveHourLimit()
     });
   }
 

@@ -167,6 +167,7 @@ function migrate(db) {
     gateway_current_account_id: "",
     gateway_last_daily_rebalance_date: "",
     gateway_affinity_state_json: "{}",
+    ignore_five_hour_limit: "false",
     billing_uncached_input_factor: "125",
     billing_cached_input_factor: "12.5",
     billing_output_factor: "750"

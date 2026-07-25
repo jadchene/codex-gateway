@@ -332,7 +332,8 @@ function registerIpc() {
 }
 
 function gatewayQuotaSummary() {
-  const detail = buildCodexQuotaHeaderDetail(store.listAccounts());
+  const settings = store.getSettings();
+  const detail = buildCodexQuotaHeaderDetail(store.listAccounts(), undefined, { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
   const primaryUsed = Number(detail.headers["x-codex-primary-used-percent"] || 0);
   const secondaryUsed = Number(detail.headers["x-codex-secondary-used-percent"] || 0);
   return {
@@ -873,6 +874,11 @@ async function refreshUsage(id) {
 
 function scheduleUsageResetRefresh(account, reason = "usage-refresh") {
   if (!account?.id) return;
+  const settings = store.getSettings();
+  if (settings.ignore_five_hour_limit === "true") {
+    clearUsageResetTimer(account.id, "ignore-five-hour");
+    return;
+  }
   const label = account.email || account.name || account.id;
   const fiveHourUsed = Number(account.quota_5h_used_percent || 0);
   const sevenDayUsed = Number(account.quota_7d_used_percent || 0);

@@ -29,6 +29,7 @@ function createGateway(store, authService, hooks = {}) {
   const sockets = new Set();
   const routing = createGatewayRouting({
     snapshot: parseAffinitySnapshot(store.getSettings().gateway_affinity_state_json),
+    getIgnoreFiveHourLimit: () => store.getSettings().ignore_five_hour_limit === "true",
     onChanged(snapshot) {
       store.saveSettings({ gateway_affinity_state_json: JSON.stringify(snapshot) });
     }
@@ -344,6 +345,7 @@ const GATEWAY_ROUTES = {
 
 function selectInitialGatewayAccount(store, settings, now = new Date()) {
   const options = dailyRebalanceOptions(settings, now);
+  if (settings.ignore_five_hour_limit === "true") options.ignoreFiveHourLimit = true;
   const account = pickGatewayAccount(store.listAccounts(), settings.gateway_current_account_id || "", [], options);
   if (!account) return null;
   const patch = { gateway_current_account_id: account.id };
@@ -439,7 +441,7 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
     excluded.add(account.id);
     account = options.routing
       ? options.routing.selectNewAccount(store.listAccounts(), Array.from(excluded))
-      : pickGatewayAccount(store.listAccounts(), "", Array.from(excluded));
+      : pickGatewayAccount(store.listAccounts(), "", Array.from(excluded), { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
   }
   if (lastResult) return { account: lastAccount || firstAccount, ...lastResult };
   throw new Error("No enabled GPT account with an access token is available.");
@@ -505,13 +507,16 @@ function syncAccountUsageFromHeaders(account, headers, store) {
   const secondaryUsed = numberHeader(headers, "x-codex-secondary-used-percent");
   const secondaryResetAfter = numberHeader(headers, "x-codex-secondary-reset-after-seconds");
 
-  applyQuotaHeaderWindow(usage, account, {
-    used: primaryUsed,
-    resetAfter: primaryResetAfter,
-    usedField: "quota_5h_used_percent",
-    resetField: "quota_5h_reset_at",
-    nowSeconds
-  });
+  const settings = store.getSettings ? store.getSettings() : {};
+  if (settings.ignore_five_hour_limit !== "true") {
+    applyQuotaHeaderWindow(usage, account, {
+      used: primaryUsed,
+      resetAfter: primaryResetAfter,
+      usedField: "quota_5h_used_percent",
+      resetField: "quota_5h_reset_at",
+      nowSeconds
+    });
+  }
   applyQuotaHeaderWindow(usage, account, {
     used: secondaryUsed,
     resetAfter: secondaryResetAfter,
@@ -605,7 +610,7 @@ function copyHeadersToResponse(headers, res, settings = {}, store = null) {
   });
   if (settings.codex_quota_headers_mode === "rewrite") {
     const accounts = store?.listAccounts ? store.listAccounts() : [];
-    const detail = buildCodexQuotaHeaderDetail(accounts);
+    const detail = buildCodexQuotaHeaderDetail(accounts, undefined, { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
     setCodexQuotaHeaders(res, detail.headers);
   }
 }
@@ -616,12 +621,12 @@ function setCodexQuotaHeaders(res, headers) {
   }
 }
 
-function buildCodexQuotaHeaders(accounts, nowSeconds = Math.floor(Date.now() / 1000)) {
-  return buildCodexQuotaHeaderDetail(accounts, nowSeconds).headers;
+function buildCodexQuotaHeaders(accounts, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
+  return buildCodexQuotaHeaderDetail(accounts, nowSeconds, options).headers;
 }
 
-function buildCodexQuotaHeaderDetail(accounts, nowSeconds = Math.floor(Date.now() / 1000)) {
-  const detail = buildCodexQuotaSnapshotDetail(accounts, nowSeconds);
+function buildCodexQuotaHeaderDetail(accounts, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
+  const detail = buildCodexQuotaSnapshotDetail(accounts, nowSeconds, options);
   const { snapshot, primary, secondary } = detail;
   const headers = {
     "x-codex-primary-used-percent": formatHeaderNumber(snapshot.primary.used_percent),
@@ -645,32 +650,34 @@ function buildCodexQuotaHeaderDetail(accounts, nowSeconds = Math.floor(Date.now(
   };
 }
 
-function buildCodexQuotaSnapshot(accounts, nowSeconds = Math.floor(Date.now() / 1000)) {
-  return buildCodexQuotaSnapshotDetail(accounts, nowSeconds).snapshot;
+function buildCodexQuotaSnapshot(accounts, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
+  return buildCodexQuotaSnapshotDetail(accounts, nowSeconds, options).snapshot;
 }
 
-function buildCodexQuotaSnapshotDetail(accounts, nowSeconds) {
+function buildCodexQuotaSnapshotDetail(accounts, nowSeconds, options = {}) {
   const pool = accounts.filter((account) => account
     && account.enabled
     && account.status !== "disabled"
     && account.access_token);
   const primary = resetAfterSeconds(pool, "quota_5h_reset_at", nowSeconds);
   const secondary = resetAfterSeconds(pool, "quota_7d_reset_at", nowSeconds);
+  const ignoreFiveHour = options.ignoreFiveHourLimit === true;
+  const secondaryUsed = roundHeaderPercent(remainingPercent(pool, "quota_7d_used_percent"));
   const snapshot = {
     primary: {
-      used_percent: roundHeaderPercent(remainingPercent(pool, "quota_5h_used_percent")),
-      window_minutes: 300,
-      reset_after_seconds: primary.value,
-      reset_at: primary.selected?.reset_at || 0
+      used_percent: ignoreFiveHour ? secondaryUsed : roundHeaderPercent(remainingPercent(pool, "quota_5h_used_percent")),
+      window_minutes: ignoreFiveHour ? 10080 : 300,
+      reset_after_seconds: ignoreFiveHour ? secondary.value : primary.value,
+      reset_at: ignoreFiveHour ? (secondary.selected?.reset_at || 0) : (primary.selected?.reset_at || 0)
     },
     secondary: {
-      used_percent: roundHeaderPercent(remainingPercent(pool, "quota_7d_used_percent")),
+      used_percent: secondaryUsed,
       window_minutes: 10080,
       reset_after_seconds: secondary.value,
       reset_at: secondary.selected?.reset_at || 0
     },
     plan_type: "unknown",
-    active_limit: "primary",
+    active_limit: ignoreFiveHour ? "secondary" : "primary",
     credits: {
       balance: 0,
       has_credits: false,

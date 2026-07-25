@@ -66,7 +66,9 @@ function createWebSocketObserver(options) {
   function observeRateLimits(event) {
     if (event.type !== "codex.rate_limits") return;
     const usage = {};
-    applyRateLimitWindow(usage, event.rate_limits?.primary, "quota_5h_used_percent", "quota_5h_reset_at");
+    if (settings.ignore_five_hour_limit !== "true") {
+      applyRateLimitWindow(usage, event.rate_limits?.primary, "quota_5h_used_percent", "quota_5h_reset_at");
+    }
     applyRateLimitWindow(usage, event.rate_limits?.secondary, "quota_7d_used_percent", "quota_7d_reset_at");
     if (Object.keys(usage).length === 0) return;
     usage.raw_usage_json = JSON.stringify({ source: "gateway-websocket-event", at: Math.floor(Date.now() / 1000), event });

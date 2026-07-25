@@ -7,7 +7,6 @@ const pages = [
   { id: "accounts", label: "账号管理" },
   { id: "auth", label: "认证管理" },
   { id: "gateway", label: "网关服务" },
-  { id: "sessions", label: "会话管理" },
   { id: "logs", label: "调用记录" },
   { id: "appLogs", label: "运行日志" },
   { id: "settings", label: "应用配置" }
@@ -324,6 +323,7 @@ function App() {
           <AccountsPage
             accounts={accounts}
             loginId={loginId}
+            settings={settings}
             onStartLogin={startLogin}
             onImportLocal={importLocalCodexAccount}
             onCancelLogin={() => {
@@ -419,7 +419,7 @@ function App() {
 }
 
 function Dashboard({ accounts, gateway, mcpGateway, tokenSummary, quotaSummary, settings }) {
-  const usable = accounts.filter(isUsableAccount).length;
+  const usable = accounts.filter((a) => isUsableAccount(a, settings)).length;
   const total = tokenSummary?.total || {};
   const billingFactors = billingFactorsFromSettings(settings);
   return (
@@ -436,7 +436,7 @@ function Dashboard({ accounts, gateway, mcpGateway, tokenSummary, quotaSummary, 
         <Metric title="MCP 网关" value={mcpGateway.running ? "运行中" : "未启动"} className="dashboard-mcp-metric" />
       </div>
       <div className="dashboard-grid quota-metric-grid">
-        <QuotaMetric title="5 小时剩余额度" detail={quotaSummary?.primary} />
+        {settings.ignore_five_hour_limit !== "true" && <QuotaMetric title="5 小时剩余额度" detail={quotaSummary?.primary} />}
         <QuotaMetric title="7 天剩余额度" detail={quotaSummary?.secondary} />
       </div>
       <div className="divider-title">今日网关数据统计</div>
@@ -451,16 +451,18 @@ function Dashboard({ accounts, gateway, mcpGateway, tokenSummary, quotaSummary, 
   );
 }
 
-function isUsableAccount(account) {
+function isUsableAccount(account, settings = {}) {
   if (!account) return false;
   if (!account.enabled || account.status === "disabled" || !account.access_token) return false;
-  return ![account.quota_5h_used_percent, account.quota_7d_used_percent]
+  const windows = [account.quota_7d_used_percent];
+  if (settings.ignore_five_hour_limit !== "true") windows.push(account.quota_5h_used_percent);
+  return !windows
     .map((value) => Number(value))
     .filter((value) => Number.isFinite(value))
     .some((value) => value >= 99.9);
 }
 
-function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin, onImportLocal, onCancelLogin, onRefreshUsage, onRefreshAll, onSetEnabled, onDelete }) {
+function AccountsPage({ accounts, loginId, refreshingIds, retryIds, settings, onStartLogin, onImportLocal, onCancelLogin, onRefreshUsage, onRefreshAll, onSetEnabled, onDelete }) {
   const [showAddOptions, setShowAddOptions] = useState(false);
   const [resetCreditsAccount, setResetCreditsAccount] = useState(null);
   const resetCredits = parseResetCredits(resetCreditsAccount);
@@ -517,7 +519,7 @@ function AccountsPage({ accounts, loginId, refreshingIds, retryIds, onStartLogin
               </div>
               <span className={account.enabled ? "pill ok" : "pill"}>{account.enabled ? "启用" : "停用"}</span>
             </div>
-            <Quota label="5 小时" value={account.quota_5h_used_percent} resetAt={account.quota_5h_reset_at} />
+            {settings.ignore_five_hour_limit !== "true" && <Quota label="5 小时" value={account.quota_5h_used_percent} resetAt={account.quota_5h_reset_at} />}
             <Quota label="7 天" value={account.quota_7d_used_percent} resetAt={account.quota_7d_reset_at} />
             <div className="meta-row"><span>套餐</span><b>{account.subscription_plan || "未知"}</b></div>
             <div className="meta-row"><span>订阅期限</span><b>{formatTime(account.subscription_expires_at)}</b></div>
@@ -626,7 +628,7 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
       {mode === "account" && (
         <div className="account-picker">
           {accounts.map((account) => {
-            const usable = isUsableAccount(account);
+            const usable = isUsableAccount(account, settings);
             return (
               <button
                 type="button"
@@ -648,7 +650,7 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
       {mode === "account" && accounts.length === 0 && <div className="empty">还没有账号，请先到账号管理完成浏览器登录。</div>}
       {!alreadyApplied && (
         <div className="actions-inline">
-          <button className="primary" type="button" onClick={apply} disabled={busy || !mode || (mode === "account" && (!accountId || !isUsableAccount(selectedAccount)))}>
+          <button className="primary" type="button" onClick={apply} disabled={busy || !mode || (mode === "account" && (!accountId || !isUsableAccount(selectedAccount, settings)))}>
             {busy ? "写入中..." : "应用到 Codex"}
           </button>
         </div>
@@ -794,6 +796,14 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
         <div className="segmented">
           <button type="button" className={(draft.codex_quota_headers_mode || "block") === "block" ? "active" : ""} onClick={() => setField("codex_quota_headers_mode", "block")}>屏蔽</button>
           <button type="button" className={draft.codex_quota_headers_mode === "rewrite" ? "active" : ""} onClick={() => setField("codex_quota_headers_mode", "rewrite")}>重写</button>
+        </div>
+      </div>
+      <div className="field">
+        <span>忽略 5 小时限制</span>
+        <small className="subtle">启用后账号管理页面和仪表盘不显示 5 小时额度，网关服务仅依据 7 天额度选择账号和返回额度信息。</small>
+        <div className="segmented">
+          <button type="button" className={draft.ignore_five_hour_limit !== "true" ? "active" : ""} onClick={() => setField("ignore_five_hour_limit", "false")}>关闭</button>
+          <button type="button" className={draft.ignore_five_hour_limit === "true" ? "active" : ""} onClick={() => setField("ignore_five_hour_limit", "true")}>启用</button>
         </div>
       </div>
       <div className="field">

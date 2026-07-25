@@ -1,16 +1,17 @@
-function usableAccount(account, nowSeconds = Math.floor(Date.now() / 1000)) {
+function usableAccount(account, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
   return account
     && account.enabled
     && account.status !== "disabled"
     && account.access_token
-    && !quotaWindowExhausted(account, nowSeconds);
+    && !quotaWindowExhausted(account, nowSeconds, options);
 }
 
-function quotaWindowExhausted(account, nowSeconds = Math.floor(Date.now() / 1000)) {
-  return [
-    [account.quota_5h_used_percent, account.quota_5h_reset_at],
-    [account.quota_7d_used_percent, account.quota_7d_reset_at]
-  ].some(([usedValue, resetValue]) => {
+function quotaWindowExhausted(account, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
+  const windows = [[account.quota_7d_used_percent, account.quota_7d_reset_at]];
+  if (!options.ignoreFiveHourLimit) {
+    windows.unshift([account.quota_5h_used_percent, account.quota_5h_reset_at]);
+  }
+  return windows.some(([usedValue, resetValue]) => {
     const used = Number(usedValue);
     if (!Number.isFinite(used) || used < 99.9) return false;
     const resetAt = Number(resetValue);
@@ -18,26 +19,29 @@ function quotaWindowExhausted(account, nowSeconds = Math.floor(Date.now() / 1000
   });
 }
 
-function usageScore(account) {
-  const windows = [account.quota_5h_used_percent, account.quota_7d_used_percent]
+function usageScore(account, options = {}) {
+  const windows = [account.quota_7d_used_percent];
+  if (!options.ignoreFiveHourLimit) windows.push(account.quota_5h_used_percent);
+  const values = windows
     .map((value) => Number(value))
     .filter((value) => Number.isFinite(value));
-  if (windows.length === 0) return 0;
-  return Math.max(...windows);
+  if (values.length === 0) return 0;
+  return Math.max(...values);
 }
 
 let lastSelectedAccountId = "";
 
 function pickGatewayAccount(accounts, currentAccountId = "", excludeIds = [], options = {}) {
   const excluded = new Set(excludeIds);
+  const ignoreFiveHourLimit = options.ignoreFiveHourLimit === true;
   const candidates = accounts
     .map((account, index) => ({ account, index }))
-    .filter(({ account }) => usableAccount(account))
+    .filter(({ account }) => usableAccount(account, undefined, { ignoreFiveHourLimit }))
     .filter(({ account }) => !excluded.has(account.id));
   if (candidates.length === 0) return null;
 
   if (options.preferSevenDayQuota) {
-    const picked = sortAccountsBySevenDayQuota(candidates).at(0)?.account || null;
+    const picked = sortAccountsBySevenDayQuota(candidates, { ignoreFiveHourLimit }).at(0)?.account || null;
     if (picked) lastSelectedAccountId = picked.id;
     return picked;
   }
@@ -60,15 +64,16 @@ function pickBalancedGatewayAccount(accounts, excludeIds = [], options = {}) {
   const nowSeconds = Math.floor(nowMs / 1000);
   const activeTurns = options.activeTurns || new Map();
   const cooldowns = options.cooldowns || new Map();
+  const ignoreFiveHourLimit = options.ignoreFiveHourLimit === true;
   const candidates = accounts
     .map((account, index) => ({ account, index }))
-    .filter(({ account }) => usableAccount(account, nowSeconds))
+    .filter(({ account }) => usableAccount(account, nowSeconds, { ignoreFiveHourLimit }))
     .filter(({ account }) => !excluded.has(account.id))
     .filter(({ account }) => Number(cooldowns.get(account.id) || 0) <= nowMs)
     .sort((left, right) => {
       const activeDiff = Number(activeTurns.get(left.account.id) || 0) - Number(activeTurns.get(right.account.id) || 0);
       if (activeDiff !== 0) return activeDiff;
-      const usageDiff = usageScore(left.account) - usageScore(right.account);
+      const usageDiff = usageScore(left.account, { ignoreFiveHourLimit }) - usageScore(right.account, { ignoreFiveHourLimit });
       if (usageDiff !== 0) return usageDiff;
       const priorityDiff = Number(left.account.priority || 100) - Number(right.account.priority || 100);
       if (priorityDiff !== 0) return priorityDiff;
@@ -86,13 +91,15 @@ function sortAccounts(accounts) {
     });
 }
 
-function sortAccountsBySevenDayQuota(accounts) {
+function sortAccountsBySevenDayQuota(accounts, options = {}) {
   return accounts
     .sort((left, right) => {
       const weeklyDiff = usedPercent(left.account.quota_7d_used_percent) - usedPercent(right.account.quota_7d_used_percent);
       if (weeklyDiff !== 0) return weeklyDiff;
-      const fiveHourDiff = usedPercent(left.account.quota_5h_used_percent) - usedPercent(right.account.quota_5h_used_percent);
-      if (fiveHourDiff !== 0) return fiveHourDiff;
+      if (!options.ignoreFiveHourLimit) {
+        const fiveHourDiff = usedPercent(left.account.quota_5h_used_percent) - usedPercent(right.account.quota_5h_used_percent);
+        if (fiveHourDiff !== 0) return fiveHourDiff;
+      }
       const priorityDiff = Number(left.account.priority || 100) - Number(right.account.priority || 100);
       if (priorityDiff !== 0) return priorityDiff;
       return left.index - right.index;

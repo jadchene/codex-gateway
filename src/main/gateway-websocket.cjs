@@ -356,7 +356,7 @@ function responseHeadersForClient(headers, settings, store, helpers) {
     }
   }
   if (settings.codex_quota_headers_mode === "rewrite") {
-    for (const [key, value] of Object.entries(helpers.buildCodexQuotaHeaders(store.listAccounts()))) {
+    for (const [key, value] of Object.entries(helpers.buildCodexQuotaHeaders(store.listAccounts(), undefined, { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" }))) {
       result.push(`${key}: ${value}`);
     }
   }
@@ -369,7 +369,7 @@ function rewriteUpstreamMessage(data, isBinary, settings, store, helpers) {
   if (event?.type !== "codex.rate_limits") return data;
   return Buffer.from(JSON.stringify({
     ...event,
-    rate_limits: helpers.buildCodexQuotaSnapshot(store.listAccounts())
+    rate_limits: helpers.buildCodexQuotaSnapshot(store.listAccounts(), undefined, { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" })
   }));
 }
 
