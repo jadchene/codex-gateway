@@ -633,7 +633,6 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
   const [mode, setMode] = useState(normalizeAuthMode(settings.codex_auth_mode));
   const [accountId, setAccountId] = useState(savedAccountId);
   const [busy, setBusy] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
   const selectedAccount = accounts.find((account) => account.id === accountId);
   const alreadyApplied = mode === "gateway"
     ? settings.codex_auth_mode === "gateway"
@@ -679,10 +678,7 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
       {!mode && <div className="empty">当前 Codex 认证状态未知，请选择一种模式后应用。</div>}
       {mode === "gateway" && (
         <div className="auth-preview-grid">
-          <div>
-            <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: showApiKey ? settings.gateway_api_key || "" : maskSecret(settings.gateway_api_key) }, null, 2)} />
-            <button type="button" onClick={() => setShowApiKey((value) => !value)}>{showApiKey ? "隐藏 API Key" : "查看 API Key"}</button>
-          </div>
+          <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: maskSecret(settings.gateway_api_key) }, null, 2)} />
           <CodePreview title="config.toml" value={providerToml(settings)} />
         </div>
       )}
