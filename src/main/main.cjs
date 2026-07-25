@@ -15,6 +15,9 @@ app.setPath("userData", browserDataDir());
 app.setName("Codex Gateway");
 app.setAppUserModelId("io.github.jadchene.codex-gateway");
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
+
 let mainWindow;
 let store;
 let gateway;
@@ -25,7 +28,17 @@ let creatingTray = false;
 let usageRefreshTimer = null;
 const usageResetTimers = new Map();
 let shuttingDown = false;
+let runtimeReady = false;
+let showWindowWhenReady = false;
 const STARTUP_DELAY_MS = 10_000;
+
+app.on("second-instance", () => {
+  if (!runtimeReady) {
+    showWindowWhenReady = true;
+    return;
+  }
+  showMainWindow();
+});
 
 async function createWindow() {
   const bounds = readWindowBounds();
@@ -55,7 +68,7 @@ async function createWindow() {
   }
 }
 
-app.whenReady().then(async () => {
+if (hasSingleInstanceLock) app.whenReady().then(async () => {
   store = createObservableStore(createStore());
   applyStartupLaunchSettings(store.getSettings());
   await waitForStartupDelay();
@@ -83,7 +96,8 @@ app.whenReady().then(async () => {
       store.addAppLog({ level: "error", scope: "mcp", action: "auto-start", status: "failed", message: error.message });
     });
   }
-  if (isStartupHiddenLaunch()) {
+  runtimeReady = true;
+  if (isStartupHiddenLaunch() && !showWindowWhenReady) {
     store.addAppLog({
       scope: "app",
       action: "startup-hidden",

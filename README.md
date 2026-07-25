@@ -17,6 +17,7 @@ It is built with Electron, React, Vite, and local SQLite storage. It is intended
 - Save, name, search, and delete Codex session IDs from call records.
 - Review local runtime logs for auth writes, gateway events, usage refreshes, and failures.
 - Configure ports, local API keys, startup behavior, tray behavior, display billing factors, and log cleanup.
+- Keep one desktop instance running; launching it again focuses the existing window.
 
 ## Why Use It
 
