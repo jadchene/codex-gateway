@@ -133,9 +133,10 @@ Default local data paths:
 
 ```text
 data/codex-gateway.sqlite
+data/browser
 ```
 
-SQLite remains beside the application directory. Electron browser runtime data uses the `Codex Gateway` directory under the system application-data location so copies launched from different installation directories share one single-instance lock. SQLite stores account metadata, quota snapshots, gateway call records, saved session names and notes, runtime logs, and app settings. Account tokens and OAuth PKCE verifiers are encrypted with Electron `safeStorage` before they are written. Existing plaintext rows are migrated on the first startup after upgrade, followed by a WAL checkpoint and database compaction. Token values are kept in the main process and are never returned through the renderer IPC account API.
+SQLite and Electron browser runtime data remain beside the application directory so upgrades retain the same system secure-storage context. Copies launched from different installation directories coordinate through a per-user named pipe. SQLite stores account metadata, quota snapshots, gateway call records, saved session names and notes, runtime logs, and app settings. Account tokens and OAuth PKCE verifiers are encrypted with Electron `safeStorage` before they are written. Existing plaintext rows are migrated on the first startup after upgrade, followed by a WAL checkpoint and database compaction. Token values are kept in the main process and are never returned through the renderer IPC account API.
 
 Call records are retained for 30 days and runtime logs for 14 days by default; both values are configurable. Expired login sessions are removed after seven days. Manual log clearing compacts the database, while daily retention cleanup performs a lightweight WAL checkpoint.
 

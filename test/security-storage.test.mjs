@@ -15,7 +15,7 @@ const { nextGatewayConfig, writeFilesTransaction } = require("../src/main/codex-
 const { createMcpGatewayService, resolveWindowsNpmShim } = require("../src/main/mcp-gateway-service.cjs");
 const { isStrongGatewayApiKey } = require("../src/main/gateway.cjs");
 const { createUsageRefreshCoordinator } = require("../src/main/usage-refresh-coordinator.cjs");
-const { electronUserDataDir } = require("../src/main/paths.cjs");
+const { acquireSingleInstanceChannel, closeSingleInstanceChannel, singleInstanceEndpoint } = require("../src/main/single-instance.cjs");
 
 test("safe storage codec encrypts account and PKCE secrets at rest and migrates plaintext rows", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-store-"));
@@ -84,15 +84,24 @@ test("store repairs a legacy refresh timestamp that points to a failed refresh",
   }
 });
 
-test("Electron user data uses one stable per-user directory for the single-instance lock", () => {
-  const appData = "C:/Users/test/AppData/Roaming";
-  const appInstance = {
-    getPath(name) {
-      assert.equal(name, "appData");
-      return appData;
-    }
-  };
-  assert.equal(electronUserDataDir(appInstance), path.join(appData, "Codex Gateway"));
+test("single-instance channel coordinates copies without changing Electron user data", async () => {
+  const endpoint = singleInstanceEndpoint({ userIdentity: `test-${process.pid}-${Date.now()}` });
+  let notified;
+  const notification = new Promise((resolve) => {
+    notified = resolve;
+  });
+  const primary = await acquireSingleInstanceChannel({ endpoint, onSecondInstance: notified });
+  try {
+    const secondary = await acquireSingleInstanceChannel({ endpoint });
+    assert.equal(primary.primary, true);
+    assert.equal(secondary.primary, false);
+    await Promise.race([
+      notification,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("single-instance notification timeout")), 1000))
+    ]);
+  } finally {
+    await closeSingleInstanceChannel(primary.server);
+  }
 });
 
 test("renderer boundary strips secrets, validates settings, and rejects foreign pages", () => {

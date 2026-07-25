@@ -133,9 +133,10 @@ mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 -
 
 ```text
 data/codex-gateway.sqlite
+data/browser
 ```
 
-SQLite 保持在应用目录旁。Electron 浏览器运行数据使用系统应用数据目录中的 `Codex Gateway` 目录，使从不同安装目录启动的程序共享同一个单实例锁。SQLite 保存账号元数据、额度快照、网关调用记录、session 名称和备注、运行日志以及应用设置。账号 Token 和 OAuth PKCE verifier 在写入前会通过 Electron `safeStorage` 加密。升级后首次启动会迁移已有明文数据，并执行 WAL checkpoint 和数据库压缩。Token 只保留在主进程，不会通过账号 IPC 接口返回给渲染进程。
+SQLite 和 Electron 浏览器运行数据都保持在应用目录旁，确保升级前后使用相同的系统安全存储上下文。不同安装目录之间通过用户级命名管道协调单实例运行。SQLite 保存账号元数据、额度快照、网关调用记录、session 名称和备注、运行日志以及应用设置。账号 Token 和 OAuth PKCE verifier 在写入前会通过 Electron `safeStorage` 加密。升级后首次启动会迁移已有明文数据，并执行 WAL checkpoint 和数据库压缩。Token 只保留在主进程，不会通过账号 IPC 接口返回给渲染进程。
 
 调用记录默认保留 30 天，运行日志默认保留 14 天，均可配置；过期登录会话保留 7 天。手工清空日志时会压缩数据库，每日自动清理则执行轻量 WAL checkpoint。
 

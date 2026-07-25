@@ -2,7 +2,8 @@ const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, scree
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { electronUserDataDir } = require("./paths.cjs");
+const { browserDataDir } = require("./paths.cjs");
+const { acquireSingleInstanceChannel, closeSingleInstanceChannel } = require("./single-instance.cjs");
 const { createStore } = require("./store.cjs");
 const { createSecretCodec } = require("./secret-codec.cjs");
 const { editableSettingsPatch, isTrustedRendererUrl, publicAccount } = require("./renderer-boundary.cjs");
@@ -13,8 +14,8 @@ const { createAuthService, accountFromTokens } = require("./auth.cjs");
 const { normalizeUsagePayload, normalizeResetCreditsPayload } = require("./quota.cjs");
 const { applyGatewayMode, applyAccountMode, detectCodexAuthMode } = require("./codex-cli-auth.cjs");
 
-fs.mkdirSync(electronUserDataDir(), { recursive: true });
-app.setPath("userData", electronUserDataDir());
+fs.mkdirSync(browserDataDir(), { recursive: true });
+app.setPath("userData", browserDataDir());
 app.setName("Codex Gateway");
 app.setAppUserModelId("io.github.jadchene.codex-gateway");
 
@@ -31,19 +32,26 @@ let creatingTray = false;
 let usageRefreshTimer = null;
 let usageRefreshCoordinator = null;
 let maintenanceTimer = null;
+let singleInstanceServer = null;
 const usageResetTimers = new Map();
 let shuttingDown = false;
 let runtimeReady = false;
 let showWindowWhenReady = false;
 const STARTUP_DELAY_MS = 10_000;
 
-app.on("second-instance", () => {
+function handleSecondInstance() {
   if (!runtimeReady) {
     showWindowWhenReady = true;
     return;
   }
   showMainWindow();
-});
+}
+
+app.on("second-instance", handleSecondInstance);
+
+const singleInstanceChannel = hasSingleInstanceLock
+  ? acquireSingleInstanceChannel({ onSecondInstance: handleSecondInstance })
+  : null;
 
 async function createWindow() {
   const bounds = readWindowBounds();
@@ -79,6 +87,13 @@ async function createWindow() {
 }
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
+  const channel = await singleInstanceChannel;
+  if (!channel.primary) {
+    shuttingDown = true;
+    app.quit();
+    return;
+  }
+  singleInstanceServer = channel.server;
   store = createObservableStore(createStore({ secretCodec: createSecretCodec(safeStorage) }));
   store.runMaintenance();
   scheduleMaintenance();
@@ -728,6 +743,9 @@ async function shutdownRuntime(reason, error) {
       }
     }
   }
+  const closingSingleInstanceServer = singleInstanceServer;
+  singleInstanceServer = null;
+  await closeSingleInstanceChannel(closingSingleInstanceServer);
 }
 
 function readWindowBounds() {
