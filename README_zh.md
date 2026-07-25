@@ -9,7 +9,7 @@ Codex Gateway 是一个本地桌面应用，用于管理个人 Codex/ChatGPT 登
 ## 功能
 
 - 通过浏览器 OAuth 添加个人账号，或导入已有的本地 Codex auth 文件。
-- 查看 5 小时和 7 天额度窗口，支持手动、定时或网关故障切换前刷新用量。
+- 查看 5 小时和 7 天额度窗口，支持手动、定时、启动时刷新，并在网关准备返回不可用前透明补刷。
 - 在本机 Codex CLI 的网关模式和直接账号模式之间切换。
 - 运行面向 Codex 请求的本地 OpenAI-compatible `/v1` 网关。
 - 以 Streamable HTTP 模式启动和停止外部 `mcp-gateway-service` 进程。
@@ -72,9 +72,11 @@ base URL: http://localhost:8436/v1
 API key: 首次运行时随机生成
 ```
 
-API key、监听 host、端口、HTTP 请求体限制、WebSocket 消息/缓冲限制，以及连接/流式/普通请求/WebSocket 响应空闲超时都可以在应用设置中修改。网关会把请求转发到配置的上游 Codex 后端，替换上游 `Authorization` 和 `ChatGPT-Account-ID`，保留 Codex 应用元数据，并移除逐跳、Cookie 和客户端凭据请求头。
+API key、监听 host、端口、HTTP 并发/请求体限制、独立的 WebSocket 连接/消息/缓冲限制，以及连接/流式/普通请求/WebSocket 响应空闲超时都可以在应用设置中修改。空闲的 WebSocket 预热连接不会占用 HTTP 请求并发。网关会把请求转发到配置的上游 Codex 后端，替换上游 `Authorization` 和 `ChatGPT-Account-ID`，保留 Codex 应用元数据，并移除逐跳、Cookie 和客户端凭据请求头。
 
 账号路由采用 Session 软亲和与 Turn 强亲和。同一 Codex session 的多个 turn 会优先使用原账号；账号额度耗尽或临时不可用后，下一个尚未绑定的 turn 或新的 WebSocket 握手可以切换账号，并更新该 session 的首选账号。已经携带 `x-codex-turn-state` 的进行中 turn，以及已经建立的 WebSocket 连接，都不会在中途切换账号。客户端断开时会取消上游请求或连接；网关停机时会先取消活动流量，并在配置的宽限期结束后强制关闭残留连接。
+
+额度批量刷新采用 single-flight，最多并行刷新 3 个账号，只有全部启用账号刷新成功后才更新全局刷新时间。冷启动发现额度过期时，应用会先等待补刷，再自动启动网关。如果 HTTP 请求或 WebSocket 握手仍然选不到可用账号，同一个客户端操作会强制刷新并重新选择一次，不需要用户重启应用或手工重新连接。
 
 Responses WebSocket 与 Realtime/sideband WebSocket 均可代理。网关会在客户端侧和上游侧分别协商压缩，保留 Codex 应用请求头与握手元数据，带背压地双向转发文本和二进制消息，传递关闭语义，并记录 WebSocket 响应事件中的 token 用量。
 
@@ -82,7 +84,7 @@ Responses WebSocket 与 Realtime/sideband WebSocket 均可代理。网关会在�
 
 Auth Management 支持两种模式：
 
-- Gateway mode：向 `~/.codex/auth.json` 写入本地 `OPENAI_API_KEY`，并确保 `~/.codex/config.toml` 中存在 `codex_gateway` provider。
+- Gateway mode：向 `~/.codex/auth.json` 写入本地 `OPENAI_API_KEY`，选中 `codex_gateway`，并确保 `~/.codex/config.toml` 中存在该 provider，同时保留其他 provider 块。
 - Account mode：把选中的本地账号 token 写入 `~/.codex/auth.json`，并移除本应用写入的 gateway provider。
 
 Gateway provider 示例：
@@ -101,7 +103,9 @@ supports_websockets = true
 
 生成的 provider 默认启用 Responses WebSocket。手工设置 `supports_websockets = false` 后，现有 HTTP/SSE Responses、compact、models、图片和 Realtime call HTTP 路由仍然可用；它只会阻止 Codex CLI 为该 provider 选择 Responses-over-WebSocket。
 
-不要在 API Key 为空或仍是默认值时，把网关监听到 `0.0.0.0` 或其他非回环地址。非回环监听会让允许访问该网络的设备获得账号代理模型的能力；请先在设置中生成随机 Key，并限制主机防火墙的访问范围。
+认证模式切换会先暂存两个文件，写入后校验最终模式；任一写入或校验失败都会同时回滚两个文件。启动时的模式识别是只读操作，不会再隐式修改 Codex 配置。
+
+当 API Key 少于 24 个字符或仍是旧默认值时，应用会拒绝把网关启动到 `0.0.0.0` 或其他非回环地址。非回环监听会让允许访问该网络的设备获得账号代理模型的能力；启用前还应限制主机防火墙的访问范围。
 
 ## MCP Gateway 控制
 
@@ -121,7 +125,7 @@ path: /mcp
 mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 --path /mcp --json-response
 ```
 
-只有填写或启用的选项会被传入。Windows 下停止 MCP gateway 时会终止进程树，避免子进程残留。
+只有填写或启用的选项会被传入。进程启动不经过命令 shell；Windows 下会把 npm 可执行入口解析为对应的 Node.js 脚本。停止 MCP gateway 时会终止进程树，旧进程延迟到达的退出事件也不会覆盖重启后的新进程状态。
 
 ## 本地数据
 
@@ -129,10 +133,11 @@ mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 -
 
 ```text
 data/codex-gateway.sqlite
-data/browser
 ```
 
-SQLite 保存账号元数据、由应用运行时处理的加密 token 数据、额度快照、网关调用记录、session 名称和备注、运行日志以及应用设置。
+SQLite 保持在应用目录旁。Electron 浏览器运行数据使用系统应用数据目录中的 `Codex Gateway` 目录，使从不同安装目录启动的程序共享同一个单实例锁。SQLite 保存账号元数据、额度快照、网关调用记录、session 名称和备注、运行日志以及应用设置。账号 Token 和 OAuth PKCE verifier 在写入前会通过 Electron `safeStorage` 加密。升级后首次启动会迁移已有明文数据，并执行 WAL checkpoint 和数据库压缩。Token 只保留在主进程，不会通过账号 IPC 接口返回给渲染进程。
+
+调用记录默认保留 30 天，运行日志默认保留 14 天，均可配置；过期登录会话保留 7 天。手工清空日志时会压缩数据库，每日自动清理则执行轻量 WAL checkpoint。
 
 不要提交 `data/`、`~/.codex/auth.json`、`~/.codex/config.toml` 或任何包含 token 的文件。
 
@@ -156,6 +161,8 @@ npm run build
 npm run verify
 ```
 
+`npm run verify` 会检查 Node 源码语法、执行完整测试并构建渲染端。开发环境要求 Node.js `^20.19.0` 或 `>=22.12.0`。
+
 ## 打包
 
 创建 Windows unpacked 构建：
@@ -169,6 +176,8 @@ npm run pack:unpacked
 ```text
 release/win-unpacked/Codex Gateway.exe
 ```
+
+unpacked 产物只包含最小运行目录和必需的 `ws` 生产依赖，面向个人本地使用，不包含代码签名，也不是安装包。
 
 ## 安全与条款
 

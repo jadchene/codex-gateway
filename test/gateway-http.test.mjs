@@ -391,6 +391,59 @@ test("optional Codex HTTP endpoints are explicitly proxied", async () => {
   }
 });
 
+test("HTTP gateway refreshes stale quotas and retries account selection without client reconnect", async () => {
+  let refreshCount = 0;
+  const harness = await startHarness((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  }, {}, {
+    async ensureUsableAccounts() {
+      refreshCount += 1;
+      for (const account of harness.accounts) account.quota_7d_used_percent = 10;
+    }
+  });
+  try {
+    for (const account of harness.accounts) account.quota_7d_used_percent = 100;
+    const response = await gatewayFetch(harness, "/v1/responses/compact", { headers: codexHeaders("refresh-session", "refresh-turn") });
+    assert.equal(response.status, 200);
+    assert.equal(refreshCount, 1);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("HTTP gateway waits for a quota refresh and retries the current upstream request", async () => {
+  let upstreamCalls = 0;
+  let refreshCount = 0;
+  const harness = await startHarness((_req, res) => {
+    upstreamCalls += 1;
+    if (upstreamCalls <= 2) {
+      res.writeHead(429, { "content-type": "text/plain" });
+      res.end("quota exceeded");
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  }, {}, {
+    async refreshAllUsage(reason) {
+      refreshCount += 1;
+      assert.equal(reason, "gateway-quota-without-headers");
+      for (const account of harness.accounts) account.quota_7d_used_percent = 10;
+      return harness.accounts.map((account) => ({ id: account.id, ok: true }));
+    }
+  });
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses/compact", {
+      headers: codexHeaders("quota-refresh-session", "quota-refresh-turn")
+    });
+    assert.equal(response.status, 200);
+    assert.equal(refreshCount, 1);
+    assert.equal(upstreamCalls, 3);
+  } finally {
+    await harness.close();
+  }
+});
+
 function codexHeaders(sessionId, turnId) {
   return {
     authorization: "Bearer local-key",
@@ -408,7 +461,7 @@ function gatewayFetch(harness, path, options = {}) {
   });
 }
 
-async function startHarness(upstreamHandler, settingOverrides = {}) {
+async function startHarness(upstreamHandler, settingOverrides = {}, hooks = {}) {
   const upstream = http.createServer(upstreamHandler);
   await listen(upstream);
   const upstreamPort = upstream.address().port;
@@ -444,7 +497,7 @@ async function startHarness(upstreamHandler, settingOverrides = {}) {
     addTokenLog: (entry) => tokenLogs.push(entry),
     addAppLog: (entry) => appLogs.push(entry)
   };
-  const gateway = createGateway(store, null, {});
+  const gateway = createGateway(store, null, hooks);
   await gateway.start();
   return {
     gateway,

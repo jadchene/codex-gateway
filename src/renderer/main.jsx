@@ -132,21 +132,36 @@ function App() {
 
   useEffect(() => {
     if (!loginId) return undefined;
-    const timer = setInterval(async () => {
-      const status = await api.loginStatus(loginId);
-      if (status.status === "success") {
-        clearInterval(timer);
-        setLoginId("");
-        await reload();
-        setMessage("登录成功，账号已保存");
+    let cancelled = false;
+    let timer = null;
+    const poll = async () => {
+      try {
+        const status = await api.loginStatus(loginId);
+        if (cancelled) return;
+        if (status.status === "success") {
+          setLoginId("");
+          await reload();
+          setMessage("登录成功，账号已保存");
+          return;
+        }
+        if (status.status === "failed") {
+          setLoginId("");
+          setMessage(`登录失败：${status.error || "未知错误"}`);
+          return;
+        }
+        timer = setTimeout(poll, 1800);
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(`查询登录状态失败：${error.message}`);
+          timer = setTimeout(poll, 3000);
+        }
       }
-      if (status.status === "failed") {
-        clearInterval(timer);
-        setLoginId("");
-        setMessage(`登录失败：${status.error || "未知错误"}`);
-      }
-    }, 1800);
-    return () => clearInterval(timer);
+    };
+    timer = setTimeout(poll, 300);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [loginId]);
 
   const activeAccounts = useMemo(() => accounts.filter((item) => item.enabled && item.status === "active"), [accounts]);
@@ -154,8 +169,12 @@ function App() {
   const mcpGatewayUrl = mcpGateway.url || mcpGatewayBaseUrl(settings);
 
   async function saveSettings(next) {
-    setSettings(await api.saveSettings(next));
-    setMessage("配置已保存");
+    try {
+      setSettings(await api.saveSettings(next));
+      setMessage("配置已保存");
+    } catch (error) {
+      setMessage(`保存配置失败：${error.message}`);
+    }
   }
 
   async function startLogin() {
@@ -223,15 +242,23 @@ function App() {
   }
 
   async function toggleGateway() {
-    const next = gateway.running ? await api.stopGateway() : await api.startGateway();
-    setGateway(next);
-    setMessage(next.running ? "网关已启动" : "网关已停止");
+    try {
+      const next = gateway.running ? await api.stopGateway() : await api.startGateway();
+      setGateway(next);
+      setMessage(next.running ? "网关已启动" : "网关已停止");
+    } catch (error) {
+      setMessage(`网关操作失败：${error.message}`);
+    }
   }
 
   async function toggleMcpGateway() {
-    const next = mcpGateway.running ? await api.stopMcpGateway() : await api.startMcpGateway();
-    setMcpGateway(next);
-    setMessage(next.running ? "MCP 网关已启动" : "MCP 网关已停止");
+    try {
+      const next = mcpGateway.running ? await api.stopMcpGateway() : await api.startMcpGateway();
+      setMcpGateway(next);
+      setMessage(next.running ? "MCP 网关已启动" : "MCP 网关已停止");
+    } catch (error) {
+      setMessage(`MCP 网关操作失败：${error.message}`);
+    }
   }
 
   async function saveCodexSession(session) {
@@ -242,22 +269,34 @@ function App() {
   }
 
   async function queryCodexSessions(query) {
-    setSessionQuery(query);
-    setCodexSessions(await api.listCodexSessions(query));
+    try {
+      setSessionQuery(query);
+      setCodexSessions(await api.listCodexSessions(query));
+    } catch (error) {
+      setMessage(`查询会话失败：${error.message}`);
+    }
   }
 
   async function deleteCodexSession(session) {
     if (!window.confirm(`确定要删除会话“${session.name}”吗？`)) return;
-    await api.deleteCodexSession(session.session_id);
-    const nextQuery = { ...sessionQuery };
-    setCodexSessions(await api.listCodexSessions(nextQuery));
-    setMessage(`已删除会话：${session.name}`);
+    try {
+      await api.deleteCodexSession(session.session_id);
+      const nextQuery = { ...sessionQuery };
+      setCodexSessions(await api.listCodexSessions(nextQuery));
+      setMessage(`已删除会话：${session.name}`);
+    } catch (error) {
+      setMessage(`删除会话失败：${error.message}`);
+    }
   }
 
   async function setAccountEnabled(account, enabled) {
-    await api.setAccountEnabled(account.id, enabled);
-    await reload();
-    setMessage(`${account.name} 已${enabled ? "启用" : "停用"}`);
+    try {
+      await api.setAccountEnabled(account.id, enabled);
+      await reload();
+      setMessage(`${account.name} 已${enabled ? "启用" : "停用"}`);
+    } catch (error) {
+      setMessage(`${enabled ? "启用" : "停用"}账号失败：${error.message}`);
+    }
   }
 
   async function clearTokenLogs() {
@@ -337,8 +376,13 @@ function App() {
             retryIds={retryIds}
             onDelete={async (id) => {
               if (!window.confirm("确定要删除这个账号吗？删除后需要重新登录授权。")) return;
-              await api.deleteAccount(id);
-              await reload();
+              try {
+                await api.deleteAccount(id);
+                await reload();
+                setMessage("账号已删除");
+              } catch (error) {
+                setMessage(`删除账号失败：${error.message}`);
+              }
             }}
           />
         )}
@@ -401,8 +445,12 @@ function App() {
             onSaveSession={saveCodexSession}
             onMessage={setMessage}
             onQuery={async (query) => {
-              setTokenLogs(await api.listTokenLogs(query));
-              setTokenSummary(await api.tokenSummary(query));
+              try {
+                setTokenLogs(await api.listTokenLogs(query));
+                setTokenSummary(await api.tokenSummary(query));
+              } catch (error) {
+                setMessage(`查询调用记录失败：${error.message}`);
+              }
             }}
           />
         )}
@@ -410,7 +458,13 @@ function App() {
           <AppLogsPage
             pageData={appLogs}
             onMessage={setMessage}
-            onQuery={async (query) => setAppLogs(await api.listAppLogs(query))}
+            onQuery={async (query) => {
+              try {
+                setAppLogs(await api.listAppLogs(query));
+              } catch (error) {
+                setMessage(`查询运行日志失败：${error.message}`);
+              }
+            }}
           />
         )}
       </section>
@@ -453,13 +507,16 @@ function Dashboard({ accounts, gateway, mcpGateway, tokenSummary, quotaSummary, 
 
 function isUsableAccount(account, settings = {}) {
   if (!account) return false;
-  if (!account.enabled || account.status === "disabled" || !account.access_token) return false;
-  const windows = [account.quota_7d_used_percent];
-  if (settings.ignore_five_hour_limit !== "true") windows.push(account.quota_5h_used_percent);
-  return !windows
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value))
-    .some((value) => value >= 99.9);
+  if (!account.enabled || account.status === "disabled" || !account.has_access_token) return false;
+  const now = Math.floor(Date.now() / 1000);
+  const windows = [[account.quota_7d_used_percent, account.quota_7d_reset_at]];
+  if (settings.ignore_five_hour_limit !== "true") windows.push([account.quota_5h_used_percent, account.quota_5h_reset_at]);
+  return !windows.some(([usedValue, resetValue]) => {
+    const used = Number(usedValue);
+    if (!Number.isFinite(used) || used < 99.9) return false;
+    const resetAt = Number(resetValue);
+    return !Number.isFinite(resetAt) || resetAt <= 0 || resetAt > now;
+  });
 }
 
 function AccountsPage({ accounts, loginId, refreshingIds, retryIds, settings, onStartLogin, onImportLocal, onCancelLogin, onRefreshUsage, onRefreshAll, onSetEnabled, onDelete }) {
@@ -471,7 +528,7 @@ function AccountsPage({ accounts, loginId, refreshingIds, retryIds, settings, on
       <div className="section-title">
         <div>
           <h2>GPT 账号</h2>
-          <p className="subtle">通过浏览器授权登录，应用自动保存 token 到本地 SQLite。</p>
+          <p className="subtle">通过浏览器授权登录，应用使用系统安全存储加密 Token 后保存到本地 SQLite。</p>
         </div>
         <div className="actions-inline">
           <button className="primary" onClick={() => setShowAddOptions(true)} disabled={Boolean(loginId)}>
@@ -576,6 +633,7 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
   const [mode, setMode] = useState(normalizeAuthMode(settings.codex_auth_mode));
   const [accountId, setAccountId] = useState(savedAccountId);
   const [busy, setBusy] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const selectedAccount = accounts.find((account) => account.id === accountId);
   const alreadyApplied = mode === "gateway"
     ? settings.codex_auth_mode === "gateway"
@@ -621,7 +679,10 @@ function AuthManagementPage({ settings, accounts, gatewayBase, onMessage, onAppl
       {!mode && <div className="empty">当前 Codex 认证状态未知，请选择一种模式后应用。</div>}
       {mode === "gateway" && (
         <div className="auth-preview-grid">
-          <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: settings.gateway_api_key || "" }, null, 2)} />
+          <div>
+            <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: showApiKey ? settings.gateway_api_key || "" : maskSecret(settings.gateway_api_key) }, null, 2)} />
+            <button type="button" onClick={() => setShowApiKey((value) => !value)}>{showApiKey ? "隐藏 API Key" : "查看 API Key"}</button>
+          </div>
           <CodePreview title="config.toml" value={providerToml(settings)} />
         </div>
       )}
@@ -687,8 +748,8 @@ function GatewayPage({ gateway, mcpGateway, gatewayBase, mcpGatewayUrl, settings
             </div>
           </div>
           <div className="info-box">
-            <InfoRow label="Base URL" value={gatewayBase} onCopy={() => copy(gatewayBase)} />
-            <InfoRow label="API Key" value={settings.gateway_api_key} onCopy={() => copy(settings.gateway_api_key)} />
+            <InfoRow label="Base URL" value={gatewayBase} />
+            <InfoRow label="API Key" value={maskSecret(settings.gateway_api_key)} />
             <InfoRow label="上游地址" value={settings.upstream_base_url} />
           </div>
         </section>
@@ -774,18 +835,24 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
       <div className="split split-three">
         <ControlledField name="gateway_request_body_limit_bytes" label="请求体上限 bytes" value={draft.gateway_request_body_limit_bytes} type="number" onChange={setField} />
         <ControlledField name="gateway_error_body_limit_bytes" label="错误响应上限 bytes" value={draft.gateway_error_body_limit_bytes} type="number" onChange={setField} />
-        <ControlledField name="gateway_max_concurrent_requests" label="最大并发请求数" value={draft.gateway_max_concurrent_requests} type="number" onChange={setField} />
+        <ControlledField name="gateway_max_concurrent_requests" label="HTTP 最大并发请求数" value={draft.gateway_max_concurrent_requests} type="number" onChange={setField} />
       </div>
       <div className="split split-three">
+        <ControlledField name="gateway_websocket_max_connections" label="WS 最大连接数" value={draft.gateway_websocket_max_connections} type="number" onChange={setField} />
         <ControlledField name="gateway_websocket_max_payload_bytes" label="WS 单消息上限 bytes" value={draft.gateway_websocket_max_payload_bytes} type="number" onChange={setField} />
         <ControlledField name="gateway_websocket_buffer_high_water_bytes" label="WS 转发缓冲高水位 bytes" value={draft.gateway_websocket_buffer_high_water_bytes} type="number" onChange={setField} />
-        <ControlledField name="gateway_websocket_idle_timeout_ms" label="WS 响应空闲超时 ms" value={draft.gateway_websocket_idle_timeout_ms} type="number" onChange={setField} />
       </div>
-      <div className="split">
+      <div className="split split-three">
+        <ControlledField name="gateway_websocket_idle_timeout_ms" label="WS 响应空闲超时 ms" value={draft.gateway_websocket_idle_timeout_ms} type="number" onChange={setField} />
         <ControlledField name="gateway_quota_cooldown_ms" label="未知额度冷却 ms" value={draft.gateway_quota_cooldown_ms} type="number" onChange={setField} />
         <ControlledField name="gateway_shutdown_grace_ms" label="网关停机宽限 ms" value={draft.gateway_shutdown_grace_ms} type="number" onChange={setField} />
       </div>
       <ControlledField name="usage_refresh_interval_secs" label="账号额度定时刷新间隔（秒，0 为关闭）" value={draft.usage_refresh_interval_secs} type="number" onChange={setField} />
+      <ControlledField name="usage_refresh_timeout_ms" label="单次额度请求超时 ms" value={draft.usage_refresh_timeout_ms} type="number" onChange={setField} />
+      <div className="split">
+        <ControlledField name="request_log_retention_days" label="调用记录保留天数" value={draft.request_log_retention_days} type="number" onChange={setField} />
+        <ControlledField name="app_log_retention_days" label="运行日志保留天数" value={draft.app_log_retention_days} type="number" onChange={setField} />
+      </div>
       <div className="split split-three">
         <ControlledField name="billing_uncached_input_factor" label="输入(未命中)计费系数" value={draft.billing_uncached_input_factor} type="number" step="any" onChange={setField} />
         <ControlledField name="billing_cached_input_factor" label="输入(缓存)计费系数" value={draft.billing_cached_input_factor} type="number" step="any" onChange={setField} />
@@ -870,15 +937,23 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
   );
 }
 
-function InfoRow({ label, value, onCopy }) {
+function InfoRow({ label, value, onCopy, onToggleVisibility, visible }) {
   return (
     <div className="info-row">
       <span>{label}</span>
       <code>{value || "-"}</code>
+      {onToggleVisibility && <button type="button" onClick={onToggleVisibility}>{visible ? "隐藏" : "查看"}</button>}
       {onCopy && <button type="button" onClick={onCopy}>复制</button>}
     </div>
   );
 }
+
+const maskSecret = (value) => {
+  const text = String(value || "");
+  if (!text) return "";
+  if (text.length <= 8) return "••••••••";
+  return `${text.slice(0, 4)}${"•".repeat(Math.min(16, text.length - 8))}${text.slice(-4)}`;
+};
 
 function CodePreview({ title, value }) {
   return (

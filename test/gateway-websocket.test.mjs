@@ -137,12 +137,13 @@ test("WebSocket gateway reuses one upstream connection for sequential and binary
   }
 });
 
-test("WebSocket gateway enforces active connection and message-size limits", async () => {
-  const concurrencyHarness = await startHarness({}, { gateway_max_concurrent_requests: "1" });
+test("WebSocket gateway enforces its independent connection and message-size limits", async () => {
+  const concurrencyHarness = await startHarness({}, { gateway_websocket_max_connections: "1" });
   try {
     const first = await connectGateway(concurrencyHarness, "/v1/responses", { "session-id": "session-limit-1" });
     const second = await connectFailure(concurrencyHarness, "/v1/responses", { "session-id": "session-limit-2" });
     assert.equal(second.statusCode, 503);
+    assert.equal(concurrencyHarness.appLogs.some((entry) => entry.status === "connection-limit"), true);
     first.websocket.close();
     await nextClose(first.websocket);
   } finally {
@@ -157,6 +158,37 @@ test("WebSocket gateway enforces active connection and message-size limits", asy
     assert.equal((await closed).code, 1009);
   } finally {
     await payloadHarness.close();
+  }
+});
+
+test("idle WebSocket connections do not consume HTTP request concurrency", async () => {
+  const harness = await startHarness({
+    onHttpRequest(_request, response) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+    }
+  }, {
+    gateway_max_concurrent_requests: "1",
+    gateway_websocket_max_connections: "4"
+  });
+  const connections = [];
+  try {
+    connections.push(await connectGateway(harness, "/v1/responses", { "session-id": "session-idle-1" }));
+    connections.push(await connectGateway(harness, "/v1/responses", { "session-id": "session-idle-2" }));
+
+    const response = await fetch(`${harness.gateway.status().url}/v1/responses`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer local-key",
+        "content-type": "application/json"
+      },
+      body: "{}"
+    });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "{}");
+  } finally {
+    for (const { websocket } of connections) websocket.close();
+    await harness.close();
   }
 });
 
@@ -473,8 +505,77 @@ test("gateway stop terminates active WebSockets within the shutdown grace period
   }
 });
 
+test("WebSocket gateway refreshes stale quotas before rejecting the existing handshake", async () => {
+  let refreshCount = 0;
+  let harness;
+  harness = await startHarness({
+    hooks: {
+      async ensureUsableAccounts() {
+        refreshCount += 1;
+        for (const account of harness.accounts) account.quota_7d_used_percent = 10;
+      }
+    },
+    onConnection(websocket) {
+      websocket.close(1000, "ok");
+    }
+  });
+  try {
+    for (const account of harness.accounts) account.quota_7d_used_percent = 100;
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "refresh-session" });
+    await nextClose(websocket);
+    assert.equal(refreshCount, 1);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket gateway waits for a quota refresh and retries the current handshake", async () => {
+  let upgradeCount = 0;
+  let refreshCount = 0;
+  let harness;
+  harness = await startHarness({
+    hooks: {
+      async refreshAllUsage(reason) {
+        refreshCount += 1;
+        assert.equal(reason, "gateway-websocket-quota-without-headers");
+        for (const account of harness.accounts) account.quota_7d_used_percent = 10;
+        return harness.accounts.map((account) => ({ id: account.id, ok: true }));
+      }
+    },
+    onUpgrade(_request, socket, _head, accept) {
+      upgradeCount += 1;
+      if (upgradeCount <= 2) {
+        socket.end([
+          "HTTP/1.1 429 Too Many Requests",
+          "Content-Type: text/plain",
+          "Content-Length: 14",
+          "Connection: close",
+          "",
+          "quota exceeded"
+        ].join("\r\n"));
+        return;
+      }
+      accept();
+    },
+    onConnection(websocket) {
+      websocket.close(1000, "ok");
+    }
+  });
+  try {
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "quota-refresh-session" });
+    await nextClose(websocket);
+    assert.equal(refreshCount, 1);
+    assert.equal(upgradeCount, 3);
+  } finally {
+    await harness.close();
+  }
+});
+
 async function startHarness(options, settingOverrides = {}) {
-  const upstreamServer = http.createServer();
+  const upstreamServer = http.createServer((request, response) => {
+    if (options.onHttpRequest) options.onHttpRequest(request, response);
+    else response.end("{}");
+  });
   const upstreamWebSocketServer = new WebSocketServer({ noServer: true, perMessageDeflate: true });
   upstreamWebSocketServer.on("headers", (headers, request) => options.onHeaders?.(headers, request));
   upstreamWebSocketServer.on("connection", (websocket, request) => options.onConnection?.(websocket, request));
@@ -496,6 +597,7 @@ async function startHarness(options, settingOverrides = {}) {
     gateway_shutdown_grace_ms: "100",
     gateway_error_body_limit_bytes: "65536",
     gateway_max_concurrent_requests: "16",
+    gateway_websocket_max_connections: "128",
     gateway_websocket_max_payload_bytes: "134217728",
     gateway_websocket_buffer_high_water_bytes: "4194304",
     gateway_websocket_idle_timeout_ms: "1000",

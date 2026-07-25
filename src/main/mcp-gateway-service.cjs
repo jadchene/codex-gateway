@@ -1,42 +1,52 @@
-const { execFile, spawn } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+const { execFile, execFileSync, spawn } = require("node:child_process");
 
 const MCP_GATEWAY_COMMAND = "mcp-gateway-service";
 
 function createMcpGatewayService(store, hooks = {}) {
   let child = null;
   let state = stoppedState();
-  let stopping = false;
+  let stopPromise = null;
+  const expectedStops = new WeakSet();
 
   async function start() {
+    if (stopPromise) await stopPromise;
     if (child) return state;
     const settings = store.getSettings();
-    const command = buildMcpGatewayCommand(settings);
+    const launch = hooks.resolveLaunch?.() || resolveMcpGatewayLaunch();
     const args = mcpGatewayArgs(settings);
+    const command = buildMcpGatewayCommand(settings);
     const output = [];
-    stopping = false;
-    child = spawn(MCP_GATEWAY_COMMAND, args, {
+    const spawned = (hooks.spawnProcess || spawn)(launch.executable, [...launch.prefixArgs, ...args], {
       windowsHide: true,
-      shell: process.platform === "win32",
+      shell: false,
       stdio: ["ignore", "pipe", "pipe"]
     });
-    child.stdout?.on("data", (chunk) => collectOutput(output, chunk));
-    child.stderr?.on("data", (chunk) => collectOutput(output, chunk));
+    child = spawned;
+    spawned.stdout?.on("data", (chunk) => collectOutput(output, chunk));
+    spawned.stderr?.on("data", (chunk) => collectOutput(output, chunk));
     state = {
       running: true,
       url: mcpGatewayUrl(settings),
       error: "",
-      pid: child.pid || 0,
+      pid: spawned.pid || 0,
       command
     };
-    child.once("error", (error) => {
+    spawned.once("error", (error) => {
+      if (child !== spawned) return;
       child = null;
-      state = { ...stoppedState(settings), error: error.message };
+      state = expectedStops.has(spawned)
+        ? stoppedState(settings)
+        : { ...stoppedState(settings), error: error.message };
       hooks.onStatusChanged?.(state);
     });
-    child.once("exit", (code, signal) => {
+    spawned.once("exit", (code, signal) => {
+      if (child !== spawned) return;
       child = null;
-      state = stopping ? stoppedState(settings) : { ...stoppedState(settings), error: exitMessage(code, signal, output) };
-      stopping = false;
+      state = expectedStops.has(spawned)
+        ? stoppedState(settings)
+        : { ...stoppedState(settings), error: exitMessage(code, signal, output) };
       hooks.onStatusChanged?.(state);
     });
     return state;
@@ -48,26 +58,71 @@ function createMcpGatewayService(store, hooks = {}) {
       state = stoppedState(settings);
       return state;
     }
+    if (stopPromise) return stopPromise;
     const closing = child;
-    child = null;
-    stopping = true;
-    await new Promise((resolve) => {
-      closing.once("exit", resolve);
-      killProcessTree(closing);
-      setTimeout(resolve, 1500);
+    expectedStops.add(closing);
+    stopPromise = new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (child === closing) child = null;
+        if (!child) state = stoppedState(settings);
+        resolve(state);
+      };
+      closing.once("exit", finish);
+      closing.once("error", finish);
+      (hooks.killProcess || killProcessTree)(closing);
+      setTimeout(finish, Number(hooks.stopTimeoutMs || 3000));
+    }).finally(() => {
+      stopPromise = null;
     });
-    state = stoppedState(settings);
-    return state;
+    return stopPromise;
   }
 
   function status() {
     const settings = store.getSettings();
     return child
       ? state
-      : stoppedState(settings);
+      : { ...state, running: false, url: "", pid: 0, command: buildMcpGatewayCommand(settings) };
   }
 
   return { start, stop, status };
+}
+
+function resolveMcpGatewayLaunch() {
+  if (process.platform !== "win32") {
+    return { executable: MCP_GATEWAY_COMMAND, prefixArgs: [] };
+  }
+  const matches = whereWindows(MCP_GATEWAY_COMMAND);
+  const native = matches.find((item) => /\.exe$/i.test(item));
+  if (native) return { executable: native, prefixArgs: [] };
+  const shim = matches.find((item) => /\.cmd$/i.test(item));
+  if (!shim) throw new Error("未找到 mcp-gateway-service 可执行文件。");
+  const nodeExecutable = whereWindows("node.exe").find((item) => /node\.exe$/i.test(item));
+  if (!nodeExecutable) throw new Error("未找到用于运行 mcp-gateway-service 的 Node.js。");
+  return resolveWindowsNpmShim(shim, nodeExecutable);
+}
+
+function resolveWindowsNpmShim(shim, nodeExecutable) {
+  const base = path.dirname(shim);
+  const content = fs.readFileSync(shim, "utf8");
+  const matches = Array.from(content.matchAll(/"%dp0%\\([^"\r\n]+\.js)"/gi));
+  const relativeScript = matches.at(-1)?.[1];
+  if (!relativeScript) throw new Error(`无法解析 npm 命令入口：${shim}`);
+  const script = path.resolve(base, relativeScript.replace(/\\/g, path.sep));
+  const relative = path.relative(base, script);
+  if (relative.startsWith("..") || path.isAbsolute(relative) || !fs.existsSync(script)) {
+    throw new Error(`mcp-gateway-service 入口不存在或超出 npm 全局目录：${script}`);
+  }
+  return { executable: nodeExecutable, prefixArgs: [script] };
+}
+
+function whereWindows(command) {
+  return execFileSync("where.exe", [command], {
+    encoding: "utf8",
+    windowsHide: true
+  }).split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 }
 
 function stoppedState(settings = {}) {
@@ -158,5 +213,6 @@ module.exports = {
   createMcpGatewayService,
   buildMcpGatewayCommand,
   mcpGatewayUrl,
-  mcpGatewayPath
+  mcpGatewayPath,
+  resolveWindowsNpmShim
 };

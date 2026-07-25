@@ -1,17 +1,20 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, screen, shell } = require("electron");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { browserDataDir } = require("./paths.cjs");
+const { electronUserDataDir } = require("./paths.cjs");
 const { createStore } = require("./store.cjs");
+const { createSecretCodec } = require("./secret-codec.cjs");
+const { editableSettingsPatch, isTrustedRendererUrl, publicAccount } = require("./renderer-boundary.cjs");
+const { createUsageRefreshCoordinator } = require("./usage-refresh-coordinator.cjs");
 const { createGateway, buildCodexQuotaHeaderDetail } = require("./gateway.cjs");
 const { createMcpGatewayService } = require("./mcp-gateway-service.cjs");
 const { createAuthService, accountFromTokens } = require("./auth.cjs");
 const { normalizeUsagePayload, normalizeResetCreditsPayload } = require("./quota.cjs");
 const { applyGatewayMode, applyAccountMode, detectCodexAuthMode } = require("./codex-cli-auth.cjs");
 
-fs.mkdirSync(browserDataDir(), { recursive: true });
-app.setPath("userData", browserDataDir());
+fs.mkdirSync(electronUserDataDir(), { recursive: true });
+app.setPath("userData", electronUserDataDir());
 app.setName("Codex Gateway");
 app.setAppUserModelId("io.github.jadchene.codex-gateway");
 
@@ -26,6 +29,8 @@ let authService;
 let tray;
 let creatingTray = false;
 let usageRefreshTimer = null;
+let usageRefreshCoordinator = null;
+let maintenanceTimer = null;
 const usageResetTimers = new Map();
 let shuttingDown = false;
 let runtimeReady = false;
@@ -53,9 +58,14 @@ async function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     }
   });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!trustedRendererUrl(url)) event.preventDefault();
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   Menu.setApplicationMenu(null);
   bindWindowBoundsPersistence(mainWindow);
 
@@ -69,17 +79,32 @@ async function createWindow() {
 }
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
-  store = createObservableStore(createStore());
+  store = createObservableStore(createStore({ secretCodec: createSecretCodec(safeStorage) }));
+  store.runMaintenance();
+  scheduleMaintenance();
+  usageRefreshCoordinator = createUsageRefreshCoordinator({
+    listAccounts: () => store.listAccounts(),
+    refreshAccount: refreshUsage,
+    saveSettings: (patch) => store.saveSettings(patch),
+    addLog: (entry) => store.addAppLog(entry),
+    compactError,
+    now: () => Date.now(),
+    concurrency: 3
+  });
   applyStartupLaunchSettings(store.getSettings());
   await waitForStartupDelay();
   syncDetectedCodexAuthMode();
   authService = createAuthService(store, () => gateway.start(), refreshUsage);
-  gateway = createGateway(store, authService, { refreshAllUsage, refreshAccountToken: refreshGatewayAccountToken });
+  gateway = createGateway(store, authService, {
+    refreshAllUsage,
+    ensureUsableAccounts: () => refreshAllUsage("gateway-no-usable-account"),
+    refreshAccountToken: refreshGatewayAccountToken
+  });
   mcpGateway = createMcpGatewayService(store, { onStatusChanged: notifyMcpGatewayStatus });
   registerIpc();
   scheduleUsageRefresh("startup");
-  const startedStartupRefreshAll = checkUsageRefreshOnStartup();
-  if (!startedStartupRefreshAll) checkStaleQuotasOnStartup();
+  const startedStartupRefreshAll = await checkUsageRefreshOnStartup();
+  if (!startedStartupRefreshAll) await checkStaleQuotasOnStartup();
   if (store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
       store.addAppLog({ scope: "gateway", action: "auto-start", status: "success", message: "应用启动时自动启动网关" });
@@ -253,9 +278,9 @@ process.once("unhandledRejection", (reason) => {
 });
 
 function registerIpc() {
-  ipcMain.handle("app:bootstrap", () => ({
+  handleIpc("app:bootstrap", () => ({
     settings: store.getSettings(),
-    accounts: store.listAccounts(),
+    accounts: publicAccounts(),
     tokenLogs: store.listTokenLogs(),
     tokenSummary: store.tokenSummary(),
     codexSessions: store.listCodexSessions(),
@@ -265,32 +290,31 @@ function registerIpc() {
     mcpGateway: mcpGateway.status(),
     paths: store.paths
   }));
-  ipcMain.handle("settings:save", (_event, patch) => {
-    const settings = store.saveSettings(patch);
+  handleIpc("settings:save", (_event, patch) => {
+    const settings = store.saveSettings(editableSettingsPatch(patch));
     applyStartupLaunchSettings(settings);
     scheduleUsageRefresh("settings-save");
     syncTrayForSettings();
     return settings;
   });
-  ipcMain.handle("accounts:save", (_event, account) => store.saveAccount(account));
-  ipcMain.handle("accounts:setEnabled", (_event, id, enabled) => {
+  handleIpc("accounts:setEnabled", (_event, id, enabled) => {
     store.setAccountEnabled(id, enabled);
     if (!enabled) clearUsageResetTimer(id, "account-disabled");
-    return store.listAccounts();
+    return publicAccounts();
   });
-  ipcMain.handle("accounts:delete", (_event, id) => {
+  handleIpc("accounts:delete", (_event, id) => {
     store.deleteAccount(id);
     clearUsageResetTimer(id, "account-deleted");
-    return store.listAccounts();
+    return publicAccounts();
   });
-  ipcMain.handle("accounts:list", () => store.listAccounts());
-  ipcMain.handle("sessions:list", (_event, query) => store.listCodexSessions(query));
-  ipcMain.handle("sessions:save", (_event, session) => store.saveCodexSession(session));
-  ipcMain.handle("sessions:delete", (_event, sessionId) => store.deleteCodexSession(sessionId));
-  ipcMain.handle("tokens:list", (_event, query) => store.listTokenLogs(query));
-  ipcMain.handle("tokens:summary", (_event, query) => store.tokenSummary(query));
-  ipcMain.handle("quota:summary", () => gatewayQuotaSummary());
-  ipcMain.handle("tokens:clear", () => {
+  handleIpc("accounts:list", () => publicAccounts());
+  handleIpc("sessions:list", (_event, query) => store.listCodexSessions(query));
+  handleIpc("sessions:save", (_event, session) => store.saveCodexSession(session));
+  handleIpc("sessions:delete", (_event, sessionId) => store.deleteCodexSession(sessionId));
+  handleIpc("tokens:list", (_event, query) => store.listTokenLogs(query));
+  handleIpc("tokens:summary", (_event, query) => store.tokenSummary(query));
+  handleIpc("quota:summary", () => gatewayQuotaSummary());
+  handleIpc("tokens:clear", () => {
     const result = store.clearTokenLogs();
     store.addAppLog({
       scope: "logs",
@@ -300,28 +324,28 @@ function registerIpc() {
     });
     return result;
   });
-  ipcMain.handle("appLogs:list", (_event, query) => store.listAppLogs(query));
-  ipcMain.handle("appLogs:clear", () => store.clearAppLogs());
-  ipcMain.handle("gateway:start", async () => {
+  handleIpc("appLogs:list", (_event, query) => store.listAppLogs(query));
+  handleIpc("appLogs:clear", () => store.clearAppLogs());
+  handleIpc("gateway:start", async () => {
     return startGateway("manual");
   });
-  ipcMain.handle("gateway:stop", async () => {
+  handleIpc("gateway:stop", async () => {
     return stopGateway("manual");
   });
-  ipcMain.handle("mcpGateway:start", async () => {
+  handleIpc("mcpGateway:start", async () => {
     return startMcpGateway("manual");
   });
-  ipcMain.handle("mcpGateway:stop", async () => {
+  handleIpc("mcpGateway:stop", async () => {
     return stopMcpGateway("manual");
   });
-  ipcMain.handle("codexAuth:applyGatewayMode", () => {
+  handleIpc("codexAuth:applyGatewayMode", () => {
     const settings = store.getSettings();
     const result = applyGatewayMode(settings);
     store.saveSettings({ codex_auth_mode: "gateway", codex_selected_account_id: "" });
     store.addAppLog({ scope: "auth", action: "apply-gateway", status: "success", message: "已写入 Codex 网关模式认证" });
     return result;
   });
-  ipcMain.handle("codexAuth:applyAccountMode", (_event, accountId) => {
+  handleIpc("codexAuth:applyAccountMode", (_event, accountId) => {
     const account = store.listAccounts().find((item) => item.id === accountId);
     if (!account) throw new Error("账号不存在。");
     const result = applyAccountMode(account);
@@ -329,20 +353,40 @@ function registerIpc() {
     store.addAppLog({ scope: "auth", action: "apply-account", status: "success", message: `已写入 Codex 账号模式认证：${account.name}` });
     return result;
   });
-  ipcMain.handle("auth:startLogin", async () => {
+  handleIpc("auth:startLogin", async () => {
     const result = await authService.startLogin();
     await shell.openExternal(result.authUrl);
     return result;
   });
-  ipcMain.handle("auth:status", (_event, loginId) => authService.loginStatus(loginId));
-  ipcMain.handle("shell:openPath", (_event, target) => shell.openPath(target));
-  ipcMain.handle("accounts:refreshUsage", async (_event, id) => {
+  handleIpc("auth:status", (_event, loginId) => authService.loginStatus(loginId));
+  handleIpc("accounts:refreshUsage", async (_event, id) => {
     const result = await refreshUsage(id);
     store.addAppLog({ scope: "usage", action: "refresh-account", status: "success", message: `已刷新账号额度：${result.name}` });
-    return result;
+    return publicAccount(result);
   });
-  ipcMain.handle("accounts:refreshAllUsage", async () => refreshAllUsage("manual"));
-  ipcMain.handle("accounts:importLocalCodex", async () => importLocalCodexAccount());
+  handleIpc("accounts:refreshAllUsage", async () => refreshAllUsage("manual"));
+  handleIpc("accounts:importLocalCodex", async () => publicAccount(await importLocalCodexAccount()));
+}
+
+function handleIpc(channel, listener) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!trustedRendererUrl(event.senderFrame?.url || "")) {
+      throw new Error(`拒绝来自非应用页面的 IPC 调用：${channel}`);
+    }
+    return listener(event, ...args);
+  });
+}
+
+function trustedRendererUrl(value) {
+  return isTrustedRendererUrl(value, {
+    packaged: app.isPackaged,
+    devOrigin: "http://127.0.0.1:8435",
+    indexFile: path.resolve(__dirname, "..", "..", "dist", "renderer", "index.html")
+  });
+}
+
+function publicAccounts() {
+  return store.listAccounts().map(publicAccount);
 }
 
 function gatewayQuotaSummary() {
@@ -603,6 +647,10 @@ async function shutdownRuntime(reason, error) {
       });
     }
   }
+  if (maintenanceTimer) {
+    clearInterval(maintenanceTimer);
+    maintenanceTimer = null;
+  }
   clearAllUsageResetTimers(reason);
   if (tray) {
     tray.destroy();
@@ -772,7 +820,27 @@ function scheduleUsageRefresh(reason = "settings-save") {
   });
 }
 
-function checkUsageRefreshOnStartup() {
+function scheduleMaintenance() {
+  if (maintenanceTimer) clearInterval(maintenanceTimer);
+  maintenanceTimer = setInterval(() => {
+    try {
+      const result = store.runMaintenance();
+      if (result.requestLogsDeleted || result.appLogsDeleted || result.loginSessionsDeleted) {
+        store.addAppLog({
+          scope: "storage",
+          action: "retention-cleanup",
+          status: "success",
+          message: `自动清理：调用记录 ${result.requestLogsDeleted}，运行日志 ${result.appLogsDeleted}，登录会话 ${result.loginSessionsDeleted}`
+        });
+      }
+    } catch (error) {
+      store.addAppLog({ level: "error", scope: "storage", action: "retention-cleanup", status: "failed", message: error.message });
+    }
+  }, 24 * 60 * 60 * 1000);
+  maintenanceTimer.unref?.();
+}
+
+async function checkUsageRefreshOnStartup() {
   const settings = store.getSettings();
   const intervalSecs = Number(settings.usage_refresh_interval_secs || 900);
   if (!Number.isFinite(intervalSecs) || intervalSecs <= 0) {
@@ -803,7 +871,9 @@ function checkUsageRefreshOnStartup() {
     status: "start",
     message: `启动时检测到刷新全部额度已超过配置间隔，开始自动刷新：上次刷新 ${elapsed}，间隔 ${effectiveIntervalSecs} 秒`
   });
-  refreshAllUsage("startup-expired").catch((error) => {
+  try {
+    await refreshAllUsage("startup-expired");
+  } catch (error) {
     store.addAppLog({
       level: "error",
       scope: "usage",
@@ -811,13 +881,14 @@ function checkUsageRefreshOnStartup() {
       status: "failed",
       message: `启动时自动刷新全部额度失败：${compactError(error.message)}`
     });
-  });
+  }
   return true;
 }
 
-function checkStaleQuotasOnStartup() {
+async function checkStaleQuotasOnStartup() {
   const now = Math.floor(Date.now() / 1000);
   const accounts = store.listAccounts().filter((account) => account.enabled && account.access_token);
+  const refreshes = [];
   for (const account of accounts) {
     const fiveHourUsed = Number(account.quota_5h_used_percent || 0);
     const sevenDayUsed = Number(account.quota_7d_used_percent || 0);
@@ -834,7 +905,7 @@ function checkStaleQuotasOnStartup() {
         status: "start",
         message: `启动时检测到账号额度已过重置时间，开始自动刷新：${account.email || account.name || account.id}`
       });
-      refreshUsage(account.id).catch((error) => {
+      refreshes.push(refreshUsage(account.id).catch((error) => {
         store.addAppLog({
           level: "error",
           scope: "usage",
@@ -842,9 +913,10 @@ function checkStaleQuotasOnStartup() {
           status: "failed",
           message: `启动时自动刷新过期账号额度失败：${account.email || account.name || account.id}: ${compactError(error.message)}`
         });
-      });
+      }));
     }
   }
+  await Promise.all(refreshes);
 }
 
 async function refreshUsage(id) {
@@ -983,30 +1055,8 @@ function formatTime(epochSeconds) {
   return new Date(Number(epochSeconds) * 1000).toLocaleString("zh-CN", { hour12: false });
 }
 
-async function refreshAllUsage(reason = "manual") {
-  const accounts = store.listAccounts().filter((account) => account.enabled && account.access_token);
-  const results = [];
-  for (const account of accounts) {
-    try {
-      await refreshUsage(account.id);
-      results.push({ id: account.id, label: account.email || account.name || account.id, ok: true });
-    } catch (error) {
-      results.push({ id: account.id, label: account.email || account.name || account.id, ok: false, message: error.message });
-    }
-  }
-  const okCount = results.filter((item) => item.ok).length;
-  const failed = results.filter((item) => !item.ok);
-  const detail = failed.length > 0
-    ? `；失败：${failed.map((item) => `${item.label}: ${compactError(item.message)}`).join(" | ")}`
-    : "";
-  store.addAppLog({
-    scope: "usage",
-    action: "refresh-all",
-    status: results.some((item) => item.ok) ? "success" : "failed",
-    message: `${reason}: ${okCount}/${results.length} refreshed${detail}`
-  });
-  store.saveSettings({ last_usage_refresh_all_at: Math.floor(Date.now() / 1000) });
-  return results;
+function refreshAllUsage(reason = "manual") {
+  return usageRefreshCoordinator.refreshAll(reason);
 }
 
 function compactError(value) {
@@ -1029,6 +1079,7 @@ async function refreshGatewayAccountToken(accountId) {
 }
 
 async function requestJson(endpoint, account) {
+  const timeoutMs = usageRefreshTimeoutMs();
   const resp = await fetch(endpoint, {
     headers: {
       authorization: `Bearer ${account.access_token}`,
@@ -1037,7 +1088,8 @@ async function requestJson(endpoint, account) {
       "user-agent": "codex_cli_rs/0.136.0",
       origin: "https://chatgpt.com",
       referer: "https://chatgpt.com/"
-    }
+    },
+    signal: AbortSignal.timeout(timeoutMs)
   });
   const text = await resp.text();
   if (!resp.ok) {
@@ -1058,7 +1110,8 @@ async function refreshAccessToken(account) {
   const resp = await fetch("https://auth.openai.com/oauth/token", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body
+    body,
+    signal: AbortSignal.timeout(usageRefreshTimeoutMs())
   });
   const text = await resp.text();
   if (!resp.ok) throw new Error(`${resp.status} ${text.slice(0, 240)}`);
@@ -1069,6 +1122,11 @@ async function refreshAccessToken(account) {
     id_token: data.id_token || account.id_token,
     last_refresh: new Date().toISOString()
   };
+}
+
+function usageRefreshTimeoutMs() {
+  const configured = Number(store.getSettings().usage_refresh_timeout_ms);
+  return Number.isFinite(configured) ? Math.max(1000, Math.min(300000, Math.trunc(configured))) : 20000;
 }
 
 function shouldRefreshForUsageError(error) {

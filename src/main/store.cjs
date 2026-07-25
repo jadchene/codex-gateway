@@ -7,24 +7,29 @@ function now() {
   return Math.floor(Date.now() / 1000);
 }
 
-function createStore() {
-  fs.mkdirSync(dataDir(), { recursive: true });
-  const db = new DatabaseSync(dbPath());
+function createStore(options = {}) {
+  const secretCodec = options.secretCodec;
+  if (!secretCodec) throw new Error("createStore requires a secret codec.");
+  const targetDataDir = options.dataDir || dataDir();
+  const targetDbPath = options.dbPath || dbPath();
+  fs.mkdirSync(targetDataDir, { recursive: true });
+  const db = new DatabaseSync(targetDbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
+  migrateSecrets(db, secretCodec);
   return {
     db,
-    paths: { dataDir: dataDir(), dbPath: dbPath() },
+    paths: { dataDir: targetDataDir, dbPath: targetDbPath },
     getSettings: () => getSettings(db),
     saveSettings: (patch) => saveSettings(db, patch),
-    listAccounts: () => listAccounts(db),
-    saveAccount: (input) => saveAccount(db, input),
+    listAccounts: () => listAccounts(db, secretCodec),
+    saveAccount: (input) => saveAccount(db, input, secretCodec),
     setAccountEnabled: (id, enabled) => setAccountEnabled(db, id, enabled),
     deleteAccount: (id) => db.prepare("DELETE FROM accounts WHERE id = ?").run(id),
     updateUsage: (id, usage) => updateUsage(db, id, usage),
-    saveLoginSession: (session) => saveLoginSession(db, session),
-    getLoginSession: (id) => db.prepare("SELECT * FROM login_sessions WHERE id = ?").get(id),
+    saveLoginSession: (session) => saveLoginSession(db, session, secretCodec),
+    getLoginSession: (id) => getLoginSession(db, id, secretCodec),
     updateLoginSession: (id, status, error) => updateLoginSession(db, id, status, error),
     listCodexSessions: (query) => listCodexSessions(db, query),
     saveCodexSession: (session) => saveCodexSession(db, session),
@@ -36,7 +41,9 @@ function createStore() {
     getLastRefreshAllUsageAt: () => getLastRefreshAllUsageAt(db),
     listAppLogs: (query) => listAppLogs(db, query),
     addAppLog: (entry) => addAppLog(db, entry),
-    clearAppLogs: () => clearAppLogs(db)
+    clearAppLogs: () => clearAppLogs(db),
+    runMaintenance: () => runMaintenance(db),
+    compactDatabase: () => compactDatabase(db)
   };
 }
 
@@ -116,6 +123,10 @@ function migrate(db) {
       message TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_request_logs_account_created ON request_logs(account_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_app_logs_created_at ON app_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_login_sessions_updated_at ON login_sessions(updated_at);
   `);
   addColumnIfMissing(db, "accounts", "id_token", "TEXT");
   addColumnIfMissing(db, "accounts", "last_refresh", "TEXT");
@@ -146,11 +157,13 @@ function migrate(db) {
     gateway_request_body_limit_bytes: "67108864",
     gateway_error_body_limit_bytes: "1048576",
     gateway_max_concurrent_requests: "16",
+    gateway_websocket_max_connections: "128",
     gateway_websocket_max_payload_bytes: "134217728",
     gateway_websocket_buffer_high_water_bytes: "4194304",
     gateway_websocket_idle_timeout_ms: "120000",
     gateway_quota_cooldown_ms: "60000",
     usage_refresh_interval_secs: "900",
+    usage_refresh_timeout_ms: "20000",
     last_usage_refresh_all_at: "0",
     auto_start_gateway: "false",
     auto_start_mcp_gateway: "false",
@@ -170,17 +183,57 @@ function migrate(db) {
     ignore_five_hour_limit: "false",
     billing_uncached_input_factor: "125",
     billing_cached_input_factor: "12.5",
-    billing_output_factor: "750"
+    billing_output_factor: "750",
+    request_log_retention_days: "30",
+    app_log_retention_days: "14"
   };
   const insert = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
   for (const [key, value] of Object.entries(defaults)) insert.run(key, value);
   fillBlankSetting(db, "mcp_gateway_host", "127.0.0.1");
   fillBlankSetting(db, "mcp_gateway_port", "3000");
   fillBlankSetting(db, "mcp_gateway_path", "/mcp");
+  repairLastRefreshAllUsageAt(db);
 }
 
 function randomGatewayApiKey() {
   return `sk-${crypto.randomBytes(24).toString("base64url")}`;
+}
+
+function migrateSecrets(db, secretCodec) {
+  const accountRows = db.prepare("SELECT id, id_token, access_token, refresh_token FROM accounts").all();
+  const loginRows = db.prepare("SELECT id, code_verifier FROM login_sessions").all();
+  const accountUpdate = db.prepare(`
+    UPDATE accounts SET id_token = ?, access_token = ?, refresh_token = ? WHERE id = ?
+  `);
+  const loginUpdate = db.prepare("UPDATE login_sessions SET code_verifier = ? WHERE id = ?");
+  let changed = false;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of accountRows) {
+      const values = [row.id_token, row.access_token, row.refresh_token];
+      if (!values.some((value) => value && !secretCodec.isEncrypted(value))) continue;
+      accountUpdate.run(
+        secretCodec.encrypt(row.id_token),
+        secretCodec.encrypt(row.access_token),
+        secretCodec.encrypt(row.refresh_token),
+        row.id
+      );
+      changed = true;
+    }
+    for (const row of loginRows) {
+      if (!row.code_verifier || secretCodec.isEncrypted(row.code_verifier)) continue;
+      loginUpdate.run(secretCodec.encrypt(row.code_verifier), row.id);
+      changed = true;
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  if (changed) {
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    db.exec("VACUUM");
+  }
 }
 
 function getSettings(db) {
@@ -204,12 +257,12 @@ function saveSettings(db, patch) {
   return getSettings(db);
 }
 
-function listAccounts(db) {
+function listAccounts(db, secretCodec) {
   return db.prepare("SELECT * FROM accounts ORDER BY created_at ASC, id ASC").all()
-    .map((row) => ({ ...row, enabled: Boolean(row.enabled) }));
+    .map((row) => decodeAccountSecrets(row, secretCodec));
 }
 
-function saveAccount(db, input) {
+function saveAccount(db, input, secretCodec) {
   const ts = now();
   const id = input.id || crypto.randomUUID();
   db.prepare(`
@@ -248,8 +301,8 @@ function saveAccount(db, input) {
       raw_usage_json = excluded.raw_usage_json,
       note = excluded.note,
       updated_at = excluded.updated_at
-  `).run(normalizeAccount({ ...input, id, created_at: input.created_at || ts, updated_at: ts }));
-  return db.prepare("SELECT * FROM accounts WHERE id = ?").get(id);
+  `).run(encodeAccountSecrets(normalizeAccount({ ...input, id, created_at: input.created_at || ts, updated_at: ts }), secretCodec));
+  return decodeAccountSecrets(db.prepare("SELECT * FROM accounts WHERE id = ?").get(id), secretCodec);
 }
 
 function normalizeAccount(input) {
@@ -279,6 +332,26 @@ function normalizeAccount(input) {
     note: input.note || null,
     created_at: input.created_at,
     updated_at: input.updated_at
+  };
+}
+
+function encodeAccountSecrets(account, secretCodec) {
+  return {
+    ...account,
+    id_token: secretCodec.encrypt(account.id_token),
+    access_token: secretCodec.encrypt(account.access_token),
+    refresh_token: secretCodec.encrypt(account.refresh_token)
+  };
+}
+
+function decodeAccountSecrets(account, secretCodec) {
+  if (!account) return account;
+  return {
+    ...account,
+    id_token: secretCodec.decrypt(account.id_token),
+    access_token: secretCodec.decrypt(account.access_token),
+    refresh_token: secretCodec.decrypt(account.refresh_token),
+    enabled: Boolean(account.enabled)
   };
 }
 
@@ -338,7 +411,7 @@ function fillBlankSetting(db, key, value) {
   db.prepare("UPDATE settings SET value = ? WHERE key = ? AND TRIM(value) = ''").run(value, key);
 }
 
-function saveLoginSession(db, session) {
+function saveLoginSession(db, session, secretCodec) {
   const ts = now();
   db.prepare(`
     INSERT INTO login_sessions (id, code_verifier, redirect_uri, status, error, created_at, updated_at)
@@ -349,7 +422,12 @@ function saveLoginSession(db, session) {
       status = excluded.status,
       error = NULL,
       updated_at = excluded.updated_at
-  `).run({ ...session, created_at: ts, updated_at: ts });
+  `).run({ ...session, code_verifier: secretCodec.encrypt(session.code_verifier), created_at: ts, updated_at: ts });
+}
+
+function getLoginSession(db, id, secretCodec) {
+  const session = db.prepare("SELECT * FROM login_sessions WHERE id = ?").get(id);
+  return session ? { ...session, code_verifier: secretCodec.decrypt(session.code_verifier) } : undefined;
 }
 
 function updateLoginSession(db, id, status, error) {
@@ -449,6 +527,7 @@ function addTokenLog(db, entry) {
 
 function clearTokenLogs(db) {
   const result = db.prepare("DELETE FROM request_logs").run();
+  compactDatabase(db);
   return { deleted: Number(result.changes || 0) };
 }
 
@@ -544,15 +623,59 @@ function getLastRefreshAllUsageAt(db) {
   const row = db.prepare(`
     SELECT MAX(created_at) AS created_at
     FROM app_logs
-    WHERE scope = 'usage' AND action = 'refresh-all'
+    WHERE scope = 'usage' AND action = 'refresh-all' AND status = 'success'
   `).get();
   const logTime = Number(row?.created_at || 0);
   return Number.isFinite(logTime) ? Math.trunc(logTime) : 0;
 }
 
+function repairLastRefreshAllUsageAt(db) {
+  const setting = db.prepare("SELECT value FROM settings WHERE key = ?").get("last_usage_refresh_all_at");
+  const settingTime = Number(setting?.value || 0);
+  if (!Number.isFinite(settingTime) || settingTime <= 0) return;
+  const matchingLogs = db.prepare(`
+    SELECT status FROM app_logs
+    WHERE scope = 'usage' AND action = 'refresh-all' AND created_at = ?
+  `).all(Math.trunc(settingTime));
+  if (matchingLogs.length === 0 || matchingLogs.some((row) => row.status === "success")) return;
+  const successful = db.prepare(`
+    SELECT MAX(created_at) AS created_at FROM app_logs
+    WHERE scope = 'usage' AND action = 'refresh-all' AND status = 'success'
+  `).get();
+  const repaired = Number(successful?.created_at || 0);
+  db.prepare("UPDATE settings SET value = ? WHERE key = ?")
+    .run(String(Number.isFinite(repaired) ? Math.trunc(repaired) : 0), "last_usage_refresh_all_at");
+}
+
 function clearAppLogs(db) {
   const result = db.prepare("DELETE FROM app_logs").run();
+  compactDatabase(db);
   return { deleted: Number(result.changes || 0) };
+}
+
+function runMaintenance(db) {
+  const settings = getSettings(db);
+  const requestDays = clampInt(settings.request_log_retention_days, 30, 1, 3650);
+  const appDays = clampInt(settings.app_log_retention_days, 14, 1, 3650);
+  const current = now();
+  const requestResult = db.prepare("DELETE FROM request_logs WHERE created_at < ?")
+    .run(current - requestDays * 86400);
+  const appResult = db.prepare("DELETE FROM app_logs WHERE created_at < ?")
+    .run(current - appDays * 86400);
+  const loginResult = db.prepare("DELETE FROM login_sessions WHERE updated_at < ?")
+    .run(current - 7 * 86400);
+  db.exec("PRAGMA wal_checkpoint(PASSIVE)");
+  return {
+    requestLogsDeleted: Number(requestResult.changes || 0),
+    appLogsDeleted: Number(appResult.changes || 0),
+    loginSessionsDeleted: Number(loginResult.changes || 0)
+  };
+}
+
+function compactDatabase(db) {
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  db.exec("VACUUM");
+  return { compacted: true };
 }
 
 function listAppLogs(db, query) {

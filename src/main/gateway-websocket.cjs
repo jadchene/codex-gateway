@@ -8,6 +8,8 @@ const DEFAULT_ERROR_BODY_LIMIT_BYTES = 1024 * 1024;
 const DEFAULT_MAX_PAYLOAD_BYTES = 128 * 1024 * 1024;
 const DEFAULT_BUFFER_HIGH_WATER_BYTES = 4 * 1024 * 1024;
 const DEFAULT_QUOTA_COOLDOWN_MS = 60 * 1000;
+const DEFAULT_MAX_CONNECTIONS = 128;
+const CONNECTION_LIMIT_LOG_INTERVAL_MS = 10 * 1000;
 
 const WEBSOCKET_ROUTES = new Set([
   "/v1/responses",
@@ -48,6 +50,7 @@ const SEMANTIC_CLIENT_RESPONSE_HEADERS = new Set([
  */
 function createGatewayWebSocketGateway(options) {
   const { store, hooks = {}, runtime, helpers } = options;
+  let lastConnectionLimitLogAt = 0;
   const maxPayloadBytes = positiveSetting(store.getSettings().gateway_websocket_max_payload_bytes, DEFAULT_MAX_PAYLOAD_BYTES);
   const server = new WebSocketServer({
     noServer: true,
@@ -74,17 +77,33 @@ function createGatewayWebSocketGateway(options) {
     if (localKey && request.headers.authorization !== `Bearer ${localKey}`) {
       return rejectUpgrade(socket, 401, "Incorrect API key provided.");
     }
-    const maxConcurrentRequests = positiveSetting(settings.gateway_max_concurrent_requests, 16);
-    if (runtime.activeRequests.size >= maxConcurrentRequests) {
-      return rejectUpgrade(socket, 503, "The gateway has reached its concurrent request limit.");
+    const maxConnections = positiveSetting(settings.gateway_websocket_max_connections, DEFAULT_MAX_CONNECTIONS);
+    if (runtime.activeWebSockets.size >= maxConnections) {
+      const now = Date.now();
+      if (now - lastConnectionLimitLogAt >= CONNECTION_LIMIT_LOG_INTERVAL_MS) {
+        lastConnectionLimitLogAt = now;
+        store.addAppLog?.({
+          level: "warn",
+          scope: "gateway-websocket",
+          action: "reject",
+          status: "connection-limit",
+          message: `WebSocket 连接数已达到上限：${runtime.activeWebSockets.size}/${maxConnections}`
+        });
+      }
+      return rejectUpgrade(socket, 503, "The gateway has reached its WebSocket connection limit.");
     }
 
     const routeContext = runtime.routing.context(request.headers);
     if (routeContext.unknownTurnState) {
       return rejectUpgrade(socket, 409, "The gateway cannot safely route this existing turn state.");
     }
-    const accounts = store.listAccounts();
-    const firstAccount = selectFirstAccount(runtime.routing, routeContext, accounts);
+    let accounts = store.listAccounts();
+    let firstAccount = selectFirstAccount(runtime.routing, routeContext, accounts);
+    if (!firstAccount && hooks.ensureUsableAccounts) {
+      await hooks.ensureUsableAccounts();
+      accounts = store.listAccounts();
+      firstAccount = selectFirstAccount(runtime.routing, routeContext, accounts);
+    }
     if (!firstAccount) {
       const message = routeContext.established
         ? "The account assigned to this Codex session is unavailable. Start a new session and try again."
@@ -93,7 +112,7 @@ function createGatewayWebSocketGateway(options) {
     }
 
     const controller = new AbortController();
-    runtime.activeRequests.add(controller);
+    runtime.activeWebSockets.add(controller);
     const onClientClosed = () => abortController(controller, "client_cancelled", "WebSocket client disconnected.");
     socket.once("close", onClientClosed);
     socket.once("error", onClientClosed);
@@ -174,7 +193,7 @@ function createGatewayWebSocketGateway(options) {
       releaseAccountLoad();
       socket.off("close", onClientClosed);
       socket.off("error", onClientClosed);
-      runtime.activeRequests.delete(controller);
+      runtime.activeWebSockets.delete(controller);
     }
   }
 
@@ -195,10 +214,12 @@ async function connectWithFailover(options) {
   const allowFailover = !routeContext.established;
   let account = options.firstAccount;
   let lastError = null;
+  let quotaRefreshNeeded = false;
   while (account) {
     let result;
     try {
       result = await openUpstream(request, account, settings, helpers, signal);
+      if (quotaRefreshNeeded) scheduleUsageRefresh(options.firstAccount, hooks, routing, store);
       return { account, ...result };
     } catch (error) {
       let failure = error;
@@ -219,6 +240,7 @@ async function connectWithFailover(options) {
         account = refreshedAccount;
         try {
           result = await openUpstream(request, account, settings, helpers, signal);
+          if (quotaRefreshNeeded) scheduleUsageRefresh(options.firstAccount, hooks, routing, store);
           return { account, ...result };
         } catch (retryError) {
           failure = retryError;
@@ -228,13 +250,24 @@ async function connectWithFailover(options) {
       const headers = failure.headers || {};
       const body = failure.body || Buffer.alloc(0);
       const syncedUsage = helpers.syncAccountUsageFromHeaders(account, headers, store);
-      if (!isWebSocketQuotaFailure(failure, helpers) || !allowFailover) throw failure;
+      if (!isWebSocketQuotaFailure(failure, helpers)) throw failure;
       if (!syncedUsage) {
         routing.setCooldown(account.id, positiveSetting(settings.gateway_quota_cooldown_ms, DEFAULT_QUOTA_COOLDOWN_MS));
-        scheduleUsageRefresh(account, hooks, routing, store);
+        quotaRefreshNeeded = true;
       }
+      if (!allowFailover) break;
       excluded.add(account.id);
       account = routing.selectNewAccount(store.listAccounts(), Array.from(excluded));
+    }
+  }
+  if (lastError && quotaRefreshNeeded && !options.quotaRefreshAttempted && hooks.refreshAllUsage) {
+    const retryAccount = await refreshQuotaAndSelectRetryAccount(options);
+    if (retryAccount) {
+      return connectWithFailover({
+        ...options,
+        firstAccount: retryAccount,
+        quotaRefreshAttempted: true
+      });
     }
   }
   throw lastError || statusError(503, "No enabled GPT account with an access token is available.");
@@ -390,12 +423,40 @@ function isWebSocketQuotaFailure(error, helpers) {
   return helpers.isQuotaExhaustedResponse(error.statusCode, error.body);
 }
 
+async function refreshQuotaAndSelectRetryAccount(options) {
+  const { firstAccount, store, hooks, routing, routeContext } = options;
+  try {
+    const results = await hooks.refreshAllUsage("gateway-websocket-quota-without-headers");
+    const successfulIds = new Set(Array.isArray(results)
+      ? results.filter((item) => item?.ok && item.id).map((item) => item.id)
+      : []);
+    for (const id of successfulIds) routing.clearCooldown(id);
+    const accounts = store.listAccounts();
+    if (routeContext.established) {
+      if (!successfulIds.has(firstAccount.id)) return null;
+      return routing.findBoundAccount(routeContext, accounts);
+    }
+    return routing.selectNewAccount(accounts);
+  } catch (error) {
+    store.addAppLog?.({
+      level: "warn",
+      scope: "gateway-websocket",
+      action: "quota-refresh",
+      status: "failed",
+      message: `WebSocket 配额错误后刷新账号状态失败：${firstAccount.email || firstAccount.name || firstAccount.id}: ${error.message}`
+    });
+    return null;
+  }
+}
+
 function scheduleUsageRefresh(account, hooks, routing, store) {
-  if (!hooks.refreshAllUsage) return;
   Promise.resolve()
     .then(() => hooks.refreshAllUsage("gateway-websocket-quota-without-headers"))
     .then((results) => {
-      if (!Array.isArray(results) || results.some((item) => item?.id === account.id && item.ok)) routing.clearCooldown(account.id);
+      if (!Array.isArray(results)) return;
+      for (const item of results) {
+        if (item?.ok && item.id) routing.clearCooldown(item.id);
+      }
     })
     .catch((error) => store.addAppLog?.({
       level: "warn",

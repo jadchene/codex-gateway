@@ -26,6 +26,7 @@ function createGateway(store, authService, hooks = {}) {
   let server = null;
   let state = { running: false, url: "", error: "" };
   const activeRequests = new Set();
+  const activeWebSockets = new Set();
   const sockets = new Set();
   const routing = createGatewayRouting({
     snapshot: parseAffinitySnapshot(store.getSettings().gateway_affinity_state_json),
@@ -41,7 +42,10 @@ function createGateway(store, authService, hooks = {}) {
     const settings = store.getSettings();
     const host = settings.gateway_host || "127.0.0.1";
     const port = Number(settings.gateway_port || 1455);
-    const runtime = { activeRequests, routing };
+    if (!isLoopbackHost(host) && !isStrongGatewayApiKey(settings.gateway_api_key)) {
+      throw new Error("非回环监听地址必须配置至少 24 个字符的随机 API Key。");
+    }
+    const runtime = { activeRequests, activeWebSockets, routing };
     server = http.createServer((req, res) => handleRequest(req, res, store, authService, hooks, runtime));
     websocketGateway = createGatewayWebSocketGateway({
       store,
@@ -91,15 +95,6 @@ function createGateway(store, authService, hooks = {}) {
     const address = server.address();
     const listeningPort = typeof address === "object" && address ? address.port : port;
     state = { running: true, url: `http://${host}:${listeningPort}`, error: "" };
-    if (!isLoopbackHost(host) && (!settings.gateway_api_key || settings.gateway_api_key === "local-personal-token")) {
-      store.addAppLog?.({
-        level: "warn",
-        scope: "gateway",
-        action: "start",
-        status: "insecure-listener",
-        message: "网关正在非回环地址上监听，但 API Key 为空或仍为默认值；请立即生成随机 Key，避免账号代理能力被局域网访问。"
-      });
-    }
     return state;
   }
 
@@ -116,6 +111,7 @@ function createGateway(store, authService, hooks = {}) {
     const graceMs = positiveSetting(settings.gateway_shutdown_grace_ms, DEFAULT_SHUTDOWN_GRACE_MS);
     const closePromise = new Promise((resolve) => closing.close(resolve));
     for (const controller of activeRequests) abortController(controller, "gateway_shutdown", "Gateway is shutting down.");
+    for (const controller of activeWebSockets) abortController(controller, "gateway_shutdown", "Gateway is shutting down.");
     let forcedSocketCount = 0;
     let forceTimer = null;
     const forcePromise = new Promise((resolve) => {
@@ -188,23 +184,18 @@ async function handleRequest(req, res, store, authService, hooks, runtime = {}) 
     const bodyLimit = positiveSetting(settings.gateway_request_body_limit_bytes, DEFAULT_REQUEST_BODY_LIMIT_BYTES);
     const incomingBody = await readBody(req, bodyLimit, lifecycle.signal);
     request = buildGatewayRequest(settings.upstream_base_url, req.url, incomingBody, req.headers);
-    const accounts = store.listAccounts();
+    let accounts = store.listAccounts();
     const routeContext = runtime.routing?.context(req.headers) || { established: false, accountId: "" };
     if (routeContext.unknownTurnState) {
       return sendJson(res, 409, {
         error: { message: "The gateway cannot safely route this existing turn state. Start a new Codex turn and try again." }
       });
     }
-    let firstAccount = null;
-    if (routeContext.established) {
-      firstAccount = runtime.routing.findBoundAccount(routeContext, accounts);
-    } else {
-      firstAccount = runtime.routing?.findPreferredAccount(routeContext, accounts) || null;
-      if (!firstAccount) {
-        firstAccount = runtime.routing
-          ? runtime.routing.selectNewAccount(accounts)
-          : selectInitialGatewayAccount(store, settings);
-      }
+    let firstAccount = selectRequestAccount(runtime, routeContext, accounts, store, settings);
+    if (!firstAccount && hooks.ensureUsableAccounts) {
+      await hooks.ensureUsableAccounts();
+      accounts = store.listAccounts();
+      firstAccount = selectRequestAccount(runtime, routeContext, accounts, store, settings);
     }
     if (!firstAccount) {
       const message = routeContext.established
@@ -333,6 +324,12 @@ async function handleRequest(req, res, store, authService, hooks, runtime = {}) 
   }
 }
 
+function selectRequestAccount(runtime, routeContext, accounts, store, settings) {
+  if (routeContext.established) return runtime.routing.findBoundAccount(routeContext, accounts);
+  return runtime.routing?.findPreferredAccount(routeContext, accounts)
+    || (runtime.routing ? runtime.routing.selectNewAccount(accounts) : selectInitialGatewayAccount(store, settings));
+}
+
 const GATEWAY_ROUTES = {
   "/v1/models": ["GET"],
   "/v1/responses": ["POST"],
@@ -403,6 +400,7 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
   let account = firstAccount;
   let lastResult = null;
   let lastAccount = null;
+  let quotaRefreshNeeded = false;
   const allowAccountFailover = options.allowAccountFailover !== false;
   const maxAttempts = allowAccountFailover ? Math.max(1, store.listAccounts().length) : 1;
   for (let attempt = 0; attempt < maxAttempts && account; attempt += 1) {
@@ -428,6 +426,7 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
     }
     const syncedUsage = syncAccountUsageFromHeaders(account, result.response.headers, store);
     if (!isQuotaExhaustedResponse(result.response.status, result.body)) {
+      if (quotaRefreshNeeded) scheduleUsageRefresh(firstAccount, hooks, options.routing, store);
       saveCurrentGatewayAccount(store, account);
       return { account, ...result };
     }
@@ -435,13 +434,30 @@ async function callWithFailover(req, request, firstAccount, settings, store, hoo
     if (!syncedUsage) {
       const cooldownMs = positiveSetting(settings.gateway_quota_cooldown_ms, DEFAULT_QUOTA_COOLDOWN_MS);
       options.routing?.setCooldown(account.id, cooldownMs);
-      scheduleUsageRefresh(account, hooks, options.routing, store);
+      quotaRefreshNeeded = true;
     }
-    if (!allowAccountFailover) return { account, ...result };
+    if (!allowAccountFailover) break;
     excluded.add(account.id);
     account = options.routing
       ? options.routing.selectNewAccount(store.listAccounts(), Array.from(excluded))
       : pickGatewayAccount(store.listAccounts(), "", Array.from(excluded), { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
+  }
+  if (lastResult && quotaRefreshNeeded && !options.quotaRefreshAttempted && hooks.refreshAllUsage) {
+    const retryAccount = await refreshQuotaAndSelectRetryAccount({
+      reason: "gateway-quota-without-headers",
+      firstAccount,
+      settings,
+      store,
+      hooks,
+      routing: options.routing,
+      allowAccountFailover
+    });
+    if (retryAccount) {
+      return callWithFailover(req, request, retryAccount, settings, store, hooks, {
+        ...options,
+        quotaRefreshAttempted: true
+      });
+    }
   }
   if (lastResult) return { account: lastAccount || firstAccount, ...lastResult };
   throw new Error("No enabled GPT account with an access token is available.");
@@ -451,13 +467,46 @@ function saveCurrentGatewayAccount(store, account) {
   if (account?.id) store.saveSettings({ gateway_current_account_id: account.id });
 }
 
+async function refreshQuotaAndSelectRetryAccount(options) {
+  const { firstAccount, settings, store, hooks, routing, allowAccountFailover } = options;
+  try {
+    const results = await hooks.refreshAllUsage(options.reason);
+    const successfulIds = new Set(Array.isArray(results)
+      ? results.filter((item) => item?.ok && item.id).map((item) => item.id)
+      : []);
+    for (const id of successfulIds) routing?.clearCooldown(id);
+    const accounts = store.listAccounts();
+    if (allowAccountFailover) {
+      return routing
+        ? routing.selectNewAccount(accounts)
+        : pickGatewayAccount(accounts, "", [], { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
+    }
+    if (!successfulIds.has(firstAccount.id)) return null;
+    return pickGatewayAccount(
+      accounts.filter((item) => item.id === firstAccount.id),
+      firstAccount.id,
+      [],
+      { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" }
+    );
+  } catch (error) {
+    store.addAppLog?.({
+      level: "warn",
+      scope: "gateway",
+      action: "quota-refresh",
+      status: "failed",
+      message: `配额错误后刷新账号状态失败：${firstAccount.email || firstAccount.name || firstAccount.id}: ${error.message}`
+    });
+    return null;
+  }
+}
+
 function scheduleUsageRefresh(account, hooks, routing, store) {
-  if (!hooks.refreshAllUsage) return;
   Promise.resolve()
     .then(() => hooks.refreshAllUsage("gateway-quota-without-headers"))
     .then((results) => {
-      if (!Array.isArray(results) || results.some((item) => item?.id === account.id && item.ok)) {
-        routing?.clearCooldown(account.id);
+      if (!Array.isArray(results)) return;
+      for (const item of results) {
+        if (item?.ok && item.id) routing?.clearCooldown(item.id);
       }
     })
     .catch((error) => {
@@ -1041,6 +1090,11 @@ function isLoopbackHost(host) {
     || value === "[::1]";
 }
 
+function isStrongGatewayApiKey(value) {
+  const key = String(value || "").trim();
+  return key.length >= 24 && key !== "local-personal-token";
+}
+
 function sendJson(res, status, body) {
   if (res.writableEnded) return;
   res.statusCode = status;
@@ -1081,5 +1135,6 @@ module.exports = {
   extractTokenUsage,
   createSseUsageParser,
   isQuotaExhaustedResponse,
-  isAuthExpiredResponse
+  isAuthExpiredResponse,
+  isStrongGatewayApiKey
 };

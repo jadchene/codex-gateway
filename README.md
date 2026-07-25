@@ -9,7 +9,7 @@ It is built with Electron, React, Vite, and local SQLite storage. It is intended
 ## Features
 
 - Manage personal accounts through browser OAuth or by importing an existing local Codex auth file.
-- View 5-hour and 7-day quota windows and refresh usage manually, on a timer, or before gateway failover.
+- View 5-hour and 7-day quota windows and refresh usage manually, on a timer, at startup, or transparently before rejecting a gateway request.
 - Switch the local Codex CLI between gateway mode and direct account mode.
 - Run a local OpenAI-compatible `/v1` gateway for Codex-oriented routes.
 - Start and stop an external `mcp-gateway-service` process in Streamable HTTP mode.
@@ -72,9 +72,11 @@ base URL: http://localhost:8436/v1
 API key: randomly generated on first run
 ```
 
-The API key, host, port, HTTP body limits, WebSocket message/buffer limits, and connection/stream/unary/WebSocket idle timeouts can be changed in the app settings. The gateway forwards requests to the configured upstream Codex backend, replaces upstream `Authorization` and `ChatGPT-Account-ID`, preserves Codex application metadata, and removes hop-by-hop, cookie, and client credential headers.
+The API key, host, port, HTTP concurrency/body limits, independent WebSocket connection/message/buffer limits, and connection/stream/unary/WebSocket idle timeouts can be changed in the app settings. Idle WebSocket prewarm connections do not consume HTTP request concurrency. The gateway forwards requests to the configured upstream Codex backend, replaces upstream `Authorization` and `ChatGPT-Account-ID`, preserves Codex application metadata, and removes hop-by-hop, cookie, and client credential headers.
 
 Account routing uses soft session affinity and strict turn affinity. A Codex session keeps its preferred account across turns. When that account is exhausted or temporarily unavailable, the next unbound turn or a new WebSocket handshake can fail over and update the session preference. Requests carrying an established `x-codex-turn-state` and established WebSocket connections never move to another account. Client disconnects cancel the upstream request or socket, and gateway shutdown aborts active traffic before forcing any remaining sockets closed after the configured grace period.
+
+Quota refreshes are single-flight, refresh at most three accounts concurrently, and update the global refresh timestamp only after every enabled account succeeds. On a cold start the app waits for an overdue refresh before auto-starting the gateway. If either an HTTP request or WebSocket handshake still finds no usable account, the same client operation performs one forced refresh and account reselection before returning an error; the user does not need to restart the app or reconnect manually.
 
 Responses WebSocket transport and Realtime/sideband WebSocket transport are both proxied. The gateway negotiates compression independently on each side, preserves Codex application headers and handshake metadata, forwards text and binary messages in both directions with backpressure, propagates close semantics, and records usage found in WebSocket response events.
 
@@ -82,7 +84,7 @@ Responses WebSocket transport and Realtime/sideband WebSocket transport are both
 
 Auth Management supports two modes:
 
-- Gateway mode writes a local `OPENAI_API_KEY` to `~/.codex/auth.json` and ensures `~/.codex/config.toml` contains a `codex_gateway` provider.
+- Gateway mode writes a local `OPENAI_API_KEY` to `~/.codex/auth.json`, selects `codex_gateway`, and ensures `~/.codex/config.toml` contains that provider while preserving other provider blocks.
 - Account mode writes the selected local account token to `~/.codex/auth.json` and removes the gateway provider written by this app.
 
 Gateway provider example:
@@ -101,7 +103,9 @@ When the listener host is `0.0.0.0`, the generated provider URL still uses `loca
 
 The generated provider enables Responses WebSocket transport. Setting `supports_websockets = false` manually keeps the existing HTTP/SSE Responses, compact, models, image, and Realtime-call HTTP routes available; it only prevents Codex CLI from selecting Responses-over-WebSocket for this provider.
 
-Do not expose the gateway on `0.0.0.0` or another non-loopback address with a blank or default API key. A non-loopback listener makes account-backed model access reachable from the permitted network; generate a random key in Settings and restrict the host firewall first.
+Auth mode changes stage both files, verify the resulting mode, and roll both files back if either write or verification fails. Startup mode detection is read-only and never rewrites Codex configuration implicitly.
+
+The app refuses to start the gateway on `0.0.0.0` or another non-loopback address unless the API key has at least 24 characters and is not the legacy default. A non-loopback listener makes account-backed model access reachable from the permitted network; also restrict the host firewall before enabling it.
 
 ## MCP Gateway Control
 
@@ -121,7 +125,7 @@ Example command generated by the app:
 mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 --path /mcp --json-response
 ```
 
-Only filled or enabled options are passed. On Windows, stopping the MCP gateway uses process-tree termination so child processes are also stopped.
+Only filled or enabled options are passed. The process is launched directly without a command shell. On Windows, the app resolves the installed npm executable to its Node.js entry point, and stopping the MCP gateway uses process-tree termination so child processes are also stopped. Late exit events from an older process cannot overwrite the state of a restarted process.
 
 ## Local Data
 
@@ -129,10 +133,11 @@ Default local data paths:
 
 ```text
 data/codex-gateway.sqlite
-data/browser
 ```
 
-SQLite stores account metadata, encrypted token data handled by the app runtime, quota snapshots, gateway call records, saved session names and notes, runtime logs, and app settings.
+SQLite remains beside the application directory. Electron browser runtime data uses the `Codex Gateway` directory under the system application-data location so copies launched from different installation directories share one single-instance lock. SQLite stores account metadata, quota snapshots, gateway call records, saved session names and notes, runtime logs, and app settings. Account tokens and OAuth PKCE verifiers are encrypted with Electron `safeStorage` before they are written. Existing plaintext rows are migrated on the first startup after upgrade, followed by a WAL checkpoint and database compaction. Token values are kept in the main process and are never returned through the renderer IPC account API.
+
+Call records are retained for 30 days and runtime logs for 14 days by default; both values are configurable. Expired login sessions are removed after seven days. Manual log clearing compacts the database, while daily retention cleanup performs a lightweight WAL checkpoint.
 
 Do not commit `data/`, `~/.codex/auth.json`, `~/.codex/config.toml`, or any file containing tokens.
 
@@ -156,6 +161,8 @@ Run both verification steps:
 npm run verify
 ```
 
+`npm run verify` checks Node source syntax, runs the complete test suite, and builds the renderer. Development requires Node.js `^20.19.0` or `>=22.12.0`.
+
 ## Packaging
 
 Create an unpacked Windows build:
@@ -169,6 +176,8 @@ Output:
 ```text
 release/win-unpacked/Codex Gateway.exe
 ```
+
+The unpacked build contains a minimal runtime app directory and only the required `ws` production package. It is intended for local personal use and is not code-signed or distributed as an installer.
 
 ## Safety and Terms
 

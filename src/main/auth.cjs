@@ -109,7 +109,10 @@ function createAuthService(store, ensureGatewayStarted, refreshAccountUsage) {
   }
 
   function loginStatus(loginId) {
-    return store.getLoginSession(loginId) || { status: "unknown", error: null };
+    const session = store.getLoginSession(loginId);
+    return session
+      ? { status: session.status, error: session.error || null }
+      : { status: "unknown", error: null };
   }
 
   async function stop() {
@@ -179,7 +182,8 @@ async function exchangeCodeForTokens({ issuer, clientId, redirectUri, codeVerifi
   const resp = await fetch(`${issuer}/oauth/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body
+    body,
+    signal: AbortSignal.timeout(30_000)
   });
   const text = await resp.text();
   if (!resp.ok) throw new Error(`token exchange failed: ${resp.status} ${text.slice(0, 240)}`);

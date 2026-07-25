@@ -18,8 +18,9 @@ function dataDir() {
   return path.join(projectRoot(), "data");
 }
 
-function browserDataDir() {
-  return path.join(dataDir(), "browser");
+function electronUserDataDir(appInstance = app) {
+  if (!appInstance) return path.join(dataDir(), "browser");
+  return path.join(appInstance.getPath("appData"), "Codex Gateway");
 }
 
 function dbPath() {
@@ -29,6 +30,6 @@ function dbPath() {
 module.exports = {
   projectRoot,
   dataDir,
-  browserDataDir,
+  electronUserDataDir,
   dbPath
 };

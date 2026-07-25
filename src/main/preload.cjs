@@ -3,7 +3,6 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("codexGateway", {
   bootstrap: () => ipcRenderer.invoke("app:bootstrap"),
   saveSettings: (patch) => ipcRenderer.invoke("settings:save", patch),
-  saveAccount: (account) => ipcRenderer.invoke("accounts:save", account),
   setAccountEnabled: (id, enabled) => ipcRenderer.invoke("accounts:setEnabled", id, enabled),
   deleteAccount: (id) => ipcRenderer.invoke("accounts:delete", id),
   listAccounts: () => ipcRenderer.invoke("accounts:list"),
@@ -27,7 +26,6 @@ contextBridge.exposeInMainWorld("codexGateway", {
   applyAccountAuth: (accountId) => ipcRenderer.invoke("codexAuth:applyAccountMode", accountId),
   startLogin: () => ipcRenderer.invoke("auth:startLogin"),
   loginStatus: (loginId) => ipcRenderer.invoke("auth:status", loginId),
-  openPath: (target) => ipcRenderer.invoke("shell:openPath", target),
   onGatewayStatusChanged: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("gateway:status-changed", listener);
