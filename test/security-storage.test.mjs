@@ -105,8 +105,21 @@ test("single-instance channel coordinates copies without changing Electron user 
 });
 
 test("renderer boundary strips secrets, validates settings, and rejects foreign pages", () => {
-  const account = publicAccount({ id: "a", access_token: "access", refresh_token: "refresh", id_token: "id", raw_usage_json: "{}" });
-  assert.deepEqual(account, { id: "a", has_access_token: true, has_refresh_token: true });
+  const resetCreditsJson = JSON.stringify({ available_count: 1, credits: [{ status: "available" }] });
+  const account = publicAccount({
+    id: "a",
+    access_token: "access",
+    refresh_token: "refresh",
+    id_token: "id",
+    raw_usage_json: "{}",
+    reset_credits_json: resetCreditsJson
+  });
+  assert.deepEqual(account, {
+    id: "a",
+    reset_credits_json: resetCreditsJson,
+    has_access_token: true,
+    has_refresh_token: true
+  });
   const patch = editableSettingsPatch({ gateway_port: "8436", gateway_host: "localhost", last_usage_refresh_all_at: "999" });
   assert.deepEqual(patch, { gateway_port: "8436", gateway_host: "localhost" });
   assert.throws(() => editableSettingsPatch({ gateway_port: "70000" }), /超出范围/);

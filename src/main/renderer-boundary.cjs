@@ -53,7 +53,7 @@ const DECIMAL_SETTINGS = new Set([
 
 function publicAccount(account) {
   if (!account) return account;
-  const { id_token, access_token, refresh_token, raw_usage_json, reset_credits_json, ...safe } = account;
+  const { id_token, access_token, refresh_token, raw_usage_json, ...safe } = account;
   return {
     ...safe,
     has_access_token: Boolean(access_token),
