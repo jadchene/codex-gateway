@@ -826,7 +826,7 @@ test("mcp gateway command includes only filled optional arguments", () => {
       mcp_gateway_port: "3100",
       mcp_gateway_json_response: "true"
     }),
-    "mcp-gateway-service --http --config ./config.json --port 3100 --json-response"
+    "mcp-gateway-service --http --config ./config.json --port 3100"
   );
 });
 

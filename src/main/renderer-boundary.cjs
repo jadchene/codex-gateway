@@ -9,7 +9,7 @@ const EDITABLE_SETTING_KEYS = new Set([
   "gateway_websocket_buffer_high_water_bytes", "gateway_websocket_idle_timeout_ms", "gateway_quota_cooldown_ms",
   "usage_refresh_interval_secs", "usage_refresh_timeout_ms", "auto_start_gateway", "auto_start_mcp_gateway",
   "mcp_gateway_config_path", "mcp_gateway_host", "mcp_gateway_port", "mcp_gateway_path",
-  "mcp_gateway_json_response", "startup_launch", "close_behavior", "codex_quota_headers_mode",
+  "startup_launch", "close_behavior", "codex_quota_headers_mode",
   "ignore_five_hour_limit", "billing_uncached_input_factor", "billing_cached_input_factor",
   "billing_output_factor", "request_log_retention_days", "app_log_retention_days"
 ]);
@@ -38,7 +38,6 @@ const INTEGER_SETTINGS = {
 const ENUM_SETTINGS = {
   auto_start_gateway: ["true", "false"],
   auto_start_mcp_gateway: ["true", "false"],
-  mcp_gateway_json_response: ["", "true", "false"],
   startup_launch: ["disabled", "auto", "delayed"],
   close_behavior: ["exit", "tray"],
   codex_quota_headers_mode: ["block", "rewrite"],

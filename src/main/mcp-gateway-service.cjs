@@ -145,7 +145,6 @@ function mcpGatewayArgs(settings = {}) {
   appendOptionalArg(args, "--host", settings.mcp_gateway_host);
   appendOptionalArg(args, "--port", cleanMcpGatewayPort(settings.mcp_gateway_port));
   appendOptionalArg(args, "--path", cleanMcpGatewayPath(settings.mcp_gateway_path));
-  if (settings.mcp_gateway_json_response === "true") args.push("--json-response");
   return args;
 }
 

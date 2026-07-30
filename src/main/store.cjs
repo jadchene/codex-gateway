@@ -171,7 +171,6 @@ function migrate(db) {
     mcp_gateway_host: "127.0.0.1",
     mcp_gateway_port: "3000",
     mcp_gateway_path: "/mcp",
-    mcp_gateway_json_response: "",
     startup_launch: "disabled",
     close_behavior: "exit",
     codex_quota_headers_mode: "block",

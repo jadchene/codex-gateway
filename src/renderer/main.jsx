@@ -899,13 +899,6 @@ function SettingsPage({ settings, paths, onSave, onMessage, onClearTokenLogs, on
         <ControlledField name="mcp_gateway_path" label="路径" value={draft.mcp_gateway_path} onChange={setField} />
       </div>
       <div className="field">
-        <span>JSON Response</span>
-        <div className="segmented">
-          <button type="button" className={draft.mcp_gateway_json_response === "true" ? "active" : ""} onClick={() => setField("mcp_gateway_json_response", "true")}>启用</button>
-          <button type="button" className={draft.mcp_gateway_json_response !== "true" ? "active" : ""} onClick={() => setField("mcp_gateway_json_response", "")}>禁用</button>
-        </div>
-      </div>
-      <div className="field">
         <span>关闭窗口时</span>
         <div className="segmented">
           <button type="button" className={(draft.close_behavior || "exit") === "exit" ? "active" : ""} onClick={() => setField("close_behavior", "exit")}>退出应用</button>
@@ -1652,7 +1645,6 @@ function mcpGatewayCommand(settings = {}) {
   appendOptionalMcpArg(args, "--host", settings.mcp_gateway_host);
   appendOptionalMcpArg(args, "--port", cleanMcpGatewayPort(settings.mcp_gateway_port));
   appendOptionalMcpArg(args, "--path", cleanMcpGatewayPath(settings.mcp_gateway_path));
-  if (settings.mcp_gateway_json_response === "true") args.push("--json-response");
   return args.map(quoteCommandArg).join(" ");
 }
 

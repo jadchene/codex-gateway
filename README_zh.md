@@ -122,7 +122,7 @@ path: /mcp
 应用生成的命令示例：
 
 ```bash
-mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 --path /mcp --json-response
+mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 --path /mcp
 ```
 
 只有填写或启用的选项会被传入。进程启动不经过命令 shell；Windows 下会把 npm 可执行入口解析为对应的 Node.js 脚本。停止 MCP gateway 时会终止进程树，旧进程延迟到达的退出事件也不会覆盖重启后的新进程状态。
