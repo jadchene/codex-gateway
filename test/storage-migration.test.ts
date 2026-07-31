@@ -1,0 +1,208 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { test } from "vitest";
+import { createStore } from "../src/main/store.ts";
+
+const passthroughCodec = {
+  encrypt: (value) => value,
+  decrypt: (value) => value,
+  isEncrypted: () => true
+};
+
+test("migrations create a verified backup, model pricing storage, and remove obsolete feature tables", () => {
+  const fixture = createLegacyFixture();
+  let writerOpen = true;
+  try {
+    const store = createStore({
+      secretCodec: passthroughCodec,
+      dataDir: fixture.directory,
+      dbPath: fixture.database
+    });
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 3);
+    assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
+    assert.deepEqual(
+      { ...store.db.prepare("SELECT id, kind, base_url, supports_websocket FROM upstreams").get() },
+      {
+        id: "builtin-chatgpt-subscription-pool",
+        kind: "chatgpt_subscription_pool",
+        base_url: "https://legacy.example/codex",
+        supports_websocket: 1
+      }
+    );
+    assert.equal(store.db.prepare("PRAGMA table_info(upstream_models)").all().some((column) => column.name === "pricing_json"), true);
+    assert.equal(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_mappings'").get(), undefined);
+    assert.equal(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'routing_policies'").get(), undefined);
+    assert.equal(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'codex_sessions'").get(), undefined);
+    assert.equal(store.getSettings().appearance_theme, "system");
+    store.db.close();
+
+    const backups = backupFiles(fixture.directory);
+    assert.equal(backups.length, 1);
+    const backup = new DatabaseSync(backups[0], { readOnly: true });
+    assert.equal(backup.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+    assert.equal(backup.prepare("SELECT value FROM settings WHERE key = 'wal_fixture'").get().value, "committed");
+    assert.equal(backup.prepare("PRAGMA user_version").get().user_version, 0);
+    backup.close();
+    fixture.writer.close();
+    writerOpen = false;
+
+    const restarted = createStore({
+      secretCodec: passthroughCodec,
+      dataDir: fixture.directory,
+      dbPath: fixture.database
+    });
+    restarted.db.close();
+    assert.equal(backupFiles(fixture.directory).length, 1);
+  } finally {
+    if (writerOpen) fixture.writer.close();
+    cleanupFixture(fixture.directory);
+  }
+});
+
+test("current migration upgrades an existing v1 database with its own verified backup", () => {
+  const fixture = createV1Fixture();
+  try {
+    const store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 3);
+    assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
+    store.db.close();
+    const backups = backupFiles(fixture.directory);
+    assert.equal(backups.length, 1);
+    const backup = new DatabaseSync(backups[0], { readOnly: true });
+    assert.equal(backup.prepare("PRAGMA user_version").get().user_version, 1);
+    assert.equal(backup.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), false);
+    backup.close();
+  } finally {
+    cleanupFixture(fixture.directory);
+  }
+});
+
+test("v2 migration rolls back its column and version when interrupted", () => {
+  const fixture = createV1Fixture();
+  try {
+    assert.throws(() => createStore({
+      secretCodec: passthroughCodec,
+      dataDir: fixture.directory,
+      dbPath: fixture.database,
+      migrationHooks: {
+        beforeMigrationCommit({ version }) {
+          if (version === 2) throw new Error("simulated v2 interruption");
+        }
+      }
+    }), /simulated v2 interruption/);
+    const database = new DatabaseSync(fixture.database);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 1);
+    assert.equal(database.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), false);
+    database.close();
+    assert.equal(backupFiles(fixture.directory).length, 1);
+  } finally {
+    cleanupFixture(fixture.directory);
+  }
+});
+
+test("v1 migration rolls back schema and version when interrupted", () => {
+  const fixture = createLegacyFixture();
+  try {
+    assert.throws(() => createStore({
+      secretCodec: passthroughCodec,
+      dataDir: fixture.directory,
+      dbPath: fixture.database,
+      migrationHooks: {
+        beforeMigrationCommit() {
+          throw new Error("simulated migration interruption");
+        }
+      }
+    }), /simulated migration interruption/);
+
+    const database = new DatabaseSync(fixture.database);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 0);
+    assert.equal(
+      database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'upstreams'").get(),
+      undefined
+    );
+    database.close();
+    assert.equal(backupFiles(fixture.directory).length, 1);
+  } finally {
+    fixture.writer.close();
+    cleanupFixture(fixture.directory);
+  }
+});
+
+test("v1 migration refuses a corrupted backup before changing the source database", () => {
+  const fixture = createLegacyFixture();
+  try {
+    assert.throws(() => createStore({
+      secretCodec: passthroughCodec,
+      dataDir: fixture.directory,
+      dbPath: fixture.database,
+      migrationHooks: {
+        afterBackup({ file }) {
+          fs.writeFileSync(file, "corrupted backup", "utf8");
+        }
+      }
+    }));
+
+    const database = new DatabaseSync(fixture.database);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 0);
+    assert.equal(
+      database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'upstreams'").get(),
+      undefined
+    );
+    database.close();
+  } finally {
+    fixture.writer.close();
+    cleanupFixture(fixture.directory);
+  }
+});
+
+function createLegacyFixture() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-v1-migration-"));
+  const database = path.join(directory, "codex-gateway.sqlite");
+  const writer = new DatabaseSync(database);
+  writer.exec("PRAGMA journal_mode = WAL");
+  writer.exec(`
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE accounts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO settings (key, value) VALUES
+      ('upstream_base_url', 'https://legacy.example/codex'),
+      ('wal_fixture', 'committed');
+  `);
+  return { directory, database, writer };
+}
+
+function createV1Fixture() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-v1-schema-"));
+  const database = path.join(directory, "codex-gateway.sqlite");
+  const store = createStore({ secretCodec: passthroughCodec, dataDir: directory, dbPath: database });
+  store.db.exec("ALTER TABLE request_logs DROP COLUMN attempt_chain_json");
+  store.db.exec("DELETE FROM schema_migrations WHERE version = 2; PRAGMA user_version = 1");
+  store.db.close();
+  return { directory, database };
+}
+
+function backupFiles(directory) {
+  const backupDirectory = path.join(directory, "backups");
+  if (!fs.existsSync(backupDirectory)) return [];
+  return fs.readdirSync(backupDirectory)
+    .filter((file) => file.endsWith(".sqlite"))
+    .map((file) => path.join(backupDirectory, file));
+}
+
+function cleanupFixture(directory) {
+  try {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  } catch (error) {
+    // node:sqlite can retain an empty Windows test directory until process teardown.
+    if (process.platform !== "win32" || error?.code !== "EPERM") throw error;
+  }
+}

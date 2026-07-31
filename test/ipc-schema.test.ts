@@ -1,0 +1,21 @@
+import { describe, expect, it } from "vitest";
+import type { IpcChannel } from "../src/shared/contracts/ipc";
+import { ipcArgumentSchemas } from "../src/shared/schemas/ipc";
+
+describe("IPC runtime argument schemas", () => {
+  it("covers the current channel contract without removed features", () => {
+    const channels = Object.keys(ipcArgumentSchemas) as IpcChannel[];
+    expect(new Set(channels).size).toBe(channels.length);
+    expect(channels).toContain("upstreams:save");
+    expect(channels).toContain("upstreams:refreshBalance");
+    expect(channels).toContain("upstreams:refreshBuiltinModels");
+    expect(channels.some((channel) => channel.startsWith("modelMappings:"))).toBe(false);
+    expect(channels.some((channel) => channel.startsWith("routing:"))).toBe(false);
+    expect(channels.some((channel) => channel.startsWith("sessions:"))).toBe(false);
+  });
+
+  it("rejects invalid IDs", () => {
+    expect(ipcArgumentSchemas["upstreams:models"].safeParse([""]).success).toBe(false);
+    expect(ipcArgumentSchemas["upstreams:testInvocation"].safeParse(["upstream-a", ""]).success).toBe(false);
+  });
+});

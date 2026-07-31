@@ -2,56 +2,98 @@
 
 [English README](README.md)
 
-Codex Gateway 是一个本地桌面应用，用于管理个人 Codex/ChatGPT 登录状态、切换本机 Codex CLI 认证模式、查看额度信息，并运行本地网关服务。
+Codex Gateway 是面向个人本地开发的 Codex 桌面网关，用于统一管理 ChatGPT 订阅账号、Responses API 模型渠道、Codex CLI 接入、本地 MCP Gateway、调用分析与运行日志。
 
-项目基于 Electron、React、Vite 和本地 SQLite 存储构建。它面向个人本地开发场景，把账号、网关状态、Codex CLI 认证文件、请求记录和本地 MCP 网关进程控制集中到一个应用里。
+应用基于 Electron 43、React 19、TypeScript、Ant Design 6、Vite 和本地 SQLite。账号 Token、API Key 与 OAuth PKCE verifier 只在主进程中处理，并通过 Electron `safeStorage` 加密；渲染进程只能读取脱敏状态和指纹。
 
-## 功能
+![Codex Gateway 概览](docs/screenshots/overview.png)
 
-- 通过浏览器 OAuth 添加个人账号，或导入已有的本地 Codex auth 文件。
-- 查看 5 小时和 7 天额度窗口，支持手动、定时、启动时刷新，并在网关准备返回不可用前透明补刷。
-- 在本机 Codex CLI 的网关模式和直接账号模式之间切换。
-- 运行面向 Codex 请求的本地 OpenAI-compatible `/v1` 网关。
-- 以 Streamable HTTP 模式启动和停止外部 `mcp-gateway-service` 进程。
-- 保存网关调用记录，包括路径、上游路径、账号、session ID、耗时、状态和 token 用量。
-- 从调用记录中保存、命名、搜索和删除 Codex session ID。
-- 查看认证写入、网关事件、用量刷新和失败信息等本地运行日志。
-- 配置端口、本地 API key、自启动、托盘行为、显示用计费系数和日志清理。
-- 桌面应用仅运行一个实例；再次启动时会唤醒并聚焦已有窗口。
+## 主要能力
 
-## 为什么使用它
+- 通过浏览器 OAuth 添加 ChatGPT 订阅账号，或导入本机 Codex 认证。
+- 展示 5 小时、7 天额度窗口和 reset credits，支持手动、定时与启动刷新。
+- 配置多个 Responses API 兼容渠道，每个模型 ID 唯一归属一个渠道。
+- 合并 Codex 内置模型元数据与第三方模型元数据，让用户直接在 Codex 中选择模型。
+- 为每个模型独立配置 input、cached input、output 三项每百万 Token 费率，并统一选择计费币种。
+- 同时代理 HTTP/SSE 与原生 Responses WebSocket，不实现 WS-to-HTTP 转换。
+- 启停 Codex Gateway 与外部 `mcp-gateway-service`，并按设置在应用启动时自动拉起。
+- 查看渠道、模型、Token、耗时、状态和估算费用；调用日志行点击即可查看详情。
+- 使用 Ant Design 组件、响应式表格、固定操作列、浅色/深色主题和可折叠菜单。
+- 默认启用单实例协调，防止重复启动同一应用实例。
 
-- 不需要手工编辑 `~/.codex/auth.json` 和 `~/.codex/config.toml`，Codex 相关本地状态集中管理。
-- 当某个账号出现认证、额度或限流错误时，网关可以尝试下一个可用账号，减少个人开发中的手动切换。
-- 请求历史、session 名称、额度快照和运行日志都保存在本地 SQLite。
-- Codex 网关和 MCP 网关进程可以在同一个界面里分别控制。
+## 使用流程
 
-## 快速开始
+1. 在“订阅账号”中登录或导入账号。
+2. 如需第三方模型，在“模型渠道”中填写 Base URL、API Key 和该渠道的 Codex 模型 JSON。
+3. 为 JSON 中的每个模型设置三项费率，声明该渠道是否原生支持 WebSocket，然后保存。
+4. 在“CLI 接入”中应用网关模式。
+5. 在 Codex 中直接选择内置或第三方模型。请求中的模型 ID 决定唯一渠道。
 
-安装依赖并启动桌面应用：
+网关不做模型别名映射、渠道优先级或跨渠道 fallback。第三方模型 ID 不能与 Codex 内置模型或其他已配置渠道重复；冲突会在保存或目录重建时明确报错。
 
-```bash
-npm install
-npm run dev
-```
+## 模型目录
 
-渲染进程开发服务器地址：
+网关模式会在数据目录生成：
 
 ```text
-http://127.0.0.1:8435
+data/codex-bundled-models.json
+data/models.json
 ```
 
-首次使用流程：
+`codex-bundled-models.json` 是 `codex debug models --bundled` 的本地缓存；`models.json` 是内置模型与所有已启用第三方模型的组合目录。Codex 的 `config.toml` 会通过 `model_catalog_json` 指向 `data/models.json`，路径按实际数据目录生成，不是写死的用户目录。
 
-1. 打开应用，在 Accounts 页面添加个人账号。
-2. 在 Gateway Services 页面启动 Codex gateway。
-3. 在 Auth Management 页面应用 Gateway mode。
-4. 正常使用 Codex CLI；它会调用应用写入的本地网关 provider。
-5. 需要时在应用里查看额度、调用记录、session 和日志。
+刷新规则：
 
-## Codex Gateway API
+- 应用启动时运行一次 `codex debug models --bundled` 并更新缓存；失败时可使用已有缓存继续启动。
+- 新增、修改、启用、停用或删除模型渠道时，直接基于缓存重建组合目录。
+- Gateway 重启只校验并重建组合目录，不重复运行 Codex debug。
+- 内置账号池提供“刷新内置模型”操作，用于手动获取最新 Codex 目录。
+- 首次运行且没有可用缓存时，内置目录获取失败会明确报错。
 
-内置网关暴露一组小型 OpenAI-compatible 本地接口：
+第三方渠道必须提供完整的 Codex 模型元数据，而不是只填写模型名称。最小结构为：
+
+```json
+{
+  "models": [
+    {
+      "slug": "provider-model-id",
+      "display_name": "Provider Model",
+      "supported_reasoning_levels": [
+        { "effort": "high", "description": "High reasoning" }
+      ]
+    }
+  ]
+}
+```
+
+shell、freeform `apply_patch`、并行工具调用、MCP 和推理档位等能力由每个模型的 JSON 元数据声明。应用保留这些字段，并用渠道的“支持 WebSocket”设置覆盖模型的 `prefer_websockets`，同时写入兼容字段 `supports_websockets`，让 Codex 在模型不支持 WS 时直接使用 HTTP。
+
+## 模型渠道与计费
+
+每个 Responses API 渠道可以配置：
+
+- 名称、Base URL、Bearer API Key、启用状态；
+- 是否原生支持 Responses WebSocket；
+- 普通请求头与加密机密请求头；
+- 完整 Codex 模型 JSON；
+- JSON 中每个模型独立的 input、cached input、output 费率；
+- 可选余额查询方式。
+
+“连接检查”读取标准 `/models` 端点，不发送 Responses 请求。“调用测试”会向指定模型发送最小 Responses 请求，可能产生费用，因此会单独确认。API Key 与机密请求头保存后不回显，也不会写入日志或 Codex 配置。
+
+当前内置余额方法使用 DeepSeek 官方 `GET /user/balance` 协议。其他渠道可选择“不查询”。内置订阅账号池展示可用账号数、总账号数与 reset credits 汇总。
+
+全局只配置币种，不配置全局或渠道级计费系数。所有模型均保存三项独立费率，调用分析按实际请求模型估算费用。
+
+## 请求选择与 WebSocket
+
+HTTP/SSE 请求从请求体读取 `model`：属于已启用第三方渠道时直接调用该渠道，否则进入内置 ChatGPT 订阅账号池。订阅账号池内部仍遵守账号可用性、额度、优先级和会话/Turn 亲和规则。
+
+第三方渠道不会收到客户端携带的 OpenAI、ChatGPT、Codex、会话或账号池请求头，也不会把上游返回的同类响应头透传给客户端。为避免 Codex 将第三方 API 误判为账号池额度不足，网关只合成 5 小时和 7 天均剩余 100% 的额度信息；“订阅账号池额度响应头”设置仅控制账号池真实额度的屏蔽或汇总重写。
+
+`WS /v1/responses` 在本地握手成功后等待首个 `response.create`，再按其中的精确模型 ID 建立对应上游连接，并将该连接绑定到首个模型和渠道。第三方渠道未声明 WebSocket 支持时，组合模型目录会把 `prefer_websockets` 设为 `false`，Codex 应直接选择 HTTP；若客户端仍发起 WS，或者同一连接后续更换模型或渠道，网关会在转发前以 1012 关闭本地连接，让 Codex 按当前模型目录重新连接。网关不做 WS-to-HTTP 转换，也不会把请求发往旧渠道。
+
+## 本地 Gateway API
 
 - `GET /v1/models`
 - `POST /v1/responses`
@@ -61,36 +103,22 @@ http://127.0.0.1:8435
 - `POST /v1/images/edits`
 - `POST /v1/realtime/calls`
 - `WS /v1/responses`
-- `WS /v1/realtime`（包括携带 `call_id` 的 Realtime sideband 连接）
+- `WS /v1/realtime`
 
-默认本地配置：
+生产默认地址为 `http://localhost:8436/v1`。首次运行会生成随机本地 API Key；非回环监听要求至少 24 个字符的强 Key，并应限制主机防火墙范围。
 
-```text
-host: localhost
-port: 8436
-base URL: http://localhost:8436/v1
-API key: 首次运行时随机生成
-```
+## Codex CLI 接入
 
-API key、监听 host、端口、HTTP 并发/请求体限制、独立的 WebSocket 连接/消息/缓冲限制，以及连接/流式/普通请求/WebSocket 响应空闲超时都可以在应用设置中修改。空闲的 WebSocket 预热连接不会占用 HTTP 请求并发。网关会把请求转发到配置的上游 Codex 后端，替换上游 `Authorization` 和 `ChatGPT-Account-ID`，保留 Codex 应用元数据，并移除逐跳、Cookie 和客户端凭据请求头。
+“CLI 接入”支持：
 
-账号路由采用 Session 软亲和与 Turn 强亲和。同一 Codex session 的多个 turn 会优先使用原账号；账号额度耗尽或临时不可用后，下一个尚未绑定的 turn 或新的 WebSocket 握手可以切换账号，并更新该 session 的首选账号。已经携带 `x-codex-turn-state` 的进行中 turn，以及已经建立的 WebSocket 连接，都不会在中途切换账号。客户端断开时会取消上游请求或连接；网关停机时会先取消活动流量，并在配置的宽限期结束后强制关闭残留连接。
+- 网关模式：写入本地 `OPENAI_API_KEY`、`codex_gateway` provider 和组合模型目录路径。
+- 账号模式：写入选中订阅账号的认证，并移除本应用管理的 gateway provider 与模型目录配置。
 
-额度批量刷新采用 single-flight，最多并行刷新 3 个账号，只有全部启用账号刷新成功后才更新全局刷新时间。冷启动发现额度过期时，应用会先等待补刷，再自动启动网关。如果 HTTP 请求或 WebSocket 握手仍然选不到可用账号，同一个客户端操作会强制刷新并重新选择一次，不需要用户重启应用或手工重新连接。
-
-Responses WebSocket 与 Realtime/sideband WebSocket 均可代理。网关会在客户端侧和上游侧分别协商压缩，保留 Codex 应用请求头与握手元数据，带背压地双向转发文本和二进制消息，传递关闭语义，并记录 WebSocket 响应事件中的 token 用量。
-
-## Codex CLI 认证模式
-
-Auth Management 支持两种模式：
-
-- Gateway mode：向 `~/.codex/auth.json` 写入本地 `OPENAI_API_KEY`，选中 `codex_gateway`，并确保 `~/.codex/config.toml` 中存在该 provider，同时保留其他 provider 块。
-- Account mode：把选中的本地账号 token 写入 `~/.codex/auth.json`，并移除本应用写入的 gateway provider。
-
-Gateway provider 示例：
+核心网关配置如下：
 
 ```toml
 model_provider = "codex_gateway"
+model_catalog_json = "<data-dir>/models.json"
 
 [model_providers.codex_gateway]
 name = "OpenAI"
@@ -99,74 +127,55 @@ wire_api = "responses"
 supports_websockets = true
 ```
 
-当监听 host 是 `0.0.0.0` 时，生成的 provider URL 仍使用 `localhost`，方便 Codex CLI 连接本地服务。
+`auth.json` 与 `config.toml` 使用同一事务写入，最终验证失败时一起回滚；页面预览和检测结果均经过脱敏。
 
-生成的 provider 默认启用 Responses WebSocket。手工设置 `supports_websockets = false` 后，现有 HTTP/SSE Responses、compact、models、图片和 Realtime call HTTP 路由仍然可用；它只会阻止 Codex CLI 为该 provider 选择 Responses-over-WebSocket。
+## MCP Gateway
 
-认证模式切换会先暂存两个文件，写入后校验最终模式；任一写入或校验失败都会同时回滚两个文件。启动时的模式识别是只读操作，不会再隐式修改 Codex 配置。
-
-当 API Key 少于 24 个字符或仍是旧默认值时，应用会拒绝把网关启动到 `0.0.0.0` 或其他非回环地址。非回环监听会让允许访问该网络的设备获得账号代理模型的能力；启用前还应限制主机防火墙的访问范围。
-
-## MCP Gateway 控制
-
-Codex Gateway 可以管理外部 [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway) 进程，并以 Streamable HTTP 模式启动。
-
-默认 MCP gateway 配置：
+应用以 Streamable HTTP 模式管理外部 [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway)：
 
 ```text
-host: 127.0.0.1
-port: 3000
-path: /mcp
-```
-
-应用生成的命令示例：
-
-```bash
 mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 --path /mcp
 ```
 
-只有填写或启用的选项会被传入。进程启动不经过命令 shell；Windows 下会把 npm 可执行入口解析为对应的 Node.js 脚本。停止 MCP gateway 时会终止进程树，旧进程延迟到达的退出事件也不会覆盖重启后的新进程状态。
+进程不经过命令 shell 启动。Windows 下会解析 npm shim，并在停止时终止进程树。
 
-## 本地数据
+## 本地数据与升级
 
-默认本地数据路径：
+正式版默认数据目录：
 
 ```text
 data/codex-gateway.sqlite
+data/codex-bundled-models.json
+data/models.json
 data/browser
+data/backups
 ```
 
-SQLite 和 Electron 浏览器运行数据都保持在应用目录旁，确保升级前后使用相同的系统安全存储上下文。不同安装目录之间通过用户级命名管道协调单实例运行。SQLite 保存账号元数据、额度快照、网关调用记录、session 名称和备注、运行日志以及应用设置。账号 Token 和 OAuth PKCE verifier 在写入前会通过 Electron `safeStorage` 加密。升级后首次启动会迁移已有明文数据，并执行 WAL checkpoint 和数据库压缩。Token 只保留在主进程，不会通过账号 IPC 接口返回给渲染进程。
+SQLite 保存账号、额度、模型渠道、模型费率、调用记录、运行日志与设置。当前 schema 为 v3。旧数据库升级前会 checkpoint WAL、通过 `VACUUM INTO` 创建一致性备份并执行完整性检查；失败时回滚并保留原库与备份。
 
-调用记录默认保留 30 天，运行日志默认保留 14 天，均可配置；过期登录会话保留 7 天。手工清空日志时会压缩数据库，每日自动清理则执行轻量 WAL checkpoint。
+不要提交 `data/`、Codex 配置或任何包含 Token/API Key 的文件。
 
-不要提交 `data/`、`~/.codex/auth.json`、`~/.codex/config.toml` 或任何包含 token 的文件。
+## 开发与验证
 
-## 开发
-
-运行测试：
+开发环境要求 Node.js 24：
 
 ```bash
-npm test
+npm install
+npm run dev
 ```
 
-构建渲染端：
-
-```bash
-npm run build
-```
-
-运行完整校验：
+隔离开发模式使用 `.runtime/v1-dev` 数据和独立端口，但仍保留单实例协调以及按设置自动启动 Gateway/MCP。它不会读取正式版数据或当前用户的 Codex 凭据。
 
 ```bash
 npm run verify
+npm run pack:unpacked
+npm run smoke:unpacked
+npm run smoke:unpacked:upgrade
 ```
 
-`npm run verify` 会检查 Node 源码语法、执行完整测试并构建渲染端。开发环境要求 Node.js `^20.19.0` 或 `>=22.12.0`。
+`verify` 包含源码规则、TypeScript 检查、Vitest 和 main/preload/renderer 构建。`zod` 打入 main bundle，构建审计会检查运行时依赖边界。
 
 ## 打包
-
-创建 Windows unpacked 构建：
 
 ```bash
 npm run pack:unpacked
@@ -178,13 +187,11 @@ npm run pack:unpacked
 release/win-unpacked/Codex Gateway.exe
 ```
 
-unpacked 产物只包含最小运行目录和必需的 `ws` 生产依赖，面向个人本地使用，不包含代码签名，也不是安装包。
+产物默认启用单实例协调；当 `auto_start_gateway` 或 `auto_start_mcp_gateway` 设置为启用时，应用启动会自动拉起对应服务。本项目不包含代码签名或安装器。
 
 ## 安全与条款
 
-本项目仅用于学习和个人本地开发。用户必须遵守相关平台的服务条款。
-
-项目不提供或分发账号、API key、账号即服务或代理服务。不要将它用于多人共享、商业转售、绕过平台限制，或任何违反服务条款的活动。
+本项目仅用于学习和个人本地开发。用户必须遵守相关平台服务条款。项目不提供或分发账号、API Key、账号即服务或代理服务；不要用于多人共享、商业转售、绕过平台限制或其他违规用途。
 
 ## License
 

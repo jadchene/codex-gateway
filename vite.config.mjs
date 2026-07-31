@@ -6,8 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: "127.0.0.1",
-    port: 8435,
-    strictPort: true
+    port: 18435,
+    strictPort: true,
+    watch: {
+      ignored: ["**/.runtime/**", "**/data/**", "**/dist/**", "**/release/**"]
+    }
   },
   build: {
     outDir: "dist/renderer",

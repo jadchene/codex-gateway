@@ -2,6 +2,7 @@ node_modules/
 dist/
 release/
 data/
+.runtime/
 *.log
 *.sqlite
 *.sqlite-shm

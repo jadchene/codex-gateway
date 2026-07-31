@@ -1,0 +1,333 @@
+export interface GatewayAccountQuota {
+  id: string;
+  name?: string;
+  email?: string;
+  enabled?: boolean | number;
+  status?: string;
+  access_token?: string;
+  quota_5h_used_percent?: number | string | null;
+  quota_5h_reset_at?: number | string | null;
+  quota_7d_used_percent?: number | string | null;
+  quota_7d_reset_at?: number | string | null;
+  [key: string]: unknown;
+}
+
+interface UsageUpdate {
+  quota_5h_used_percent?: number;
+  quota_5h_reset_at?: number;
+  quota_7d_used_percent?: number;
+  quota_7d_reset_at?: number;
+  raw_usage_json?: string;
+  [key: string]: unknown;
+}
+
+interface UsageStore {
+  getSettings?: () => Record<string, unknown>;
+  updateUsage?: (accountId: string, usage: UsageUpdate) => unknown;
+}
+
+interface HeaderSource {
+  get?: (name: string) => string | null;
+  [Symbol.iterator]?: () => Iterator<[string, string]>;
+}
+
+type HeaderRecord = Record<string, string | string[] | number | undefined>;
+
+export interface QuotaOptions {
+  ignoreFiveHourLimit?: boolean;
+}
+
+interface ResetCandidate {
+  id: string;
+  email: string;
+  reset_at: number;
+  reset_after_seconds: number;
+}
+
+interface ResetDetail {
+  value: number;
+  selected: ResetCandidate | null;
+  candidates: ResetCandidate[];
+}
+
+export interface CodexQuotaSnapshot {
+  primary: {
+    used_percent: number;
+    window_minutes: number;
+    reset_after_seconds: number;
+    reset_at: number;
+  };
+  secondary: {
+    used_percent: number;
+    window_minutes: number;
+    reset_after_seconds: number;
+    reset_at: number;
+  };
+  plan_type: string;
+  active_limit: string;
+  credits: {
+    balance: number;
+    has_credits: boolean;
+    unlimited: boolean;
+  };
+}
+
+export function syncAccountUsageFromHeaders(
+  account: GatewayAccountQuota | null | undefined,
+  headers: HeaderSource | HeaderRecord | null | undefined,
+  store: UsageStore | null | undefined
+): boolean {
+  if (!account?.id || !headers || !store?.updateUsage) return false;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const usage: UsageUpdate = {};
+  const primaryUsed = numberHeader(headers, "x-codex-primary-used-percent");
+  const primaryResetAfter = numberHeader(headers, "x-codex-primary-reset-after-seconds");
+  const secondaryUsed = numberHeader(headers, "x-codex-secondary-used-percent");
+  const secondaryResetAfter = numberHeader(headers, "x-codex-secondary-reset-after-seconds");
+
+  const settings = store.getSettings?.() ?? {};
+  if (settings.ignore_five_hour_limit !== "true") {
+    applyQuotaHeaderWindow(usage, account, {
+      used: primaryUsed,
+      resetAfter: primaryResetAfter,
+      usedField: "quota_5h_used_percent",
+      resetField: "quota_5h_reset_at",
+      nowSeconds
+    });
+  }
+  applyQuotaHeaderWindow(usage, account, {
+    used: secondaryUsed,
+    resetAfter: secondaryResetAfter,
+    usedField: "quota_7d_used_percent",
+    resetField: "quota_7d_reset_at",
+    nowSeconds
+  });
+  if (Object.keys(usage).length === 0) return false;
+
+  usage.raw_usage_json = JSON.stringify({
+    source: "gateway-response-headers",
+    at: nowSeconds,
+    headers: {
+      "x-codex-primary-used-percent": headerGet(headers, "x-codex-primary-used-percent"),
+      "x-codex-primary-reset-after-seconds": headerGet(headers, "x-codex-primary-reset-after-seconds"),
+      "x-codex-secondary-used-percent": headerGet(headers, "x-codex-secondary-used-percent"),
+      "x-codex-secondary-reset-after-seconds": headerGet(headers, "x-codex-secondary-reset-after-seconds")
+    }
+  });
+  store.updateUsage(account.id, usage);
+  return true;
+}
+
+export function buildCodexQuotaHeaders(
+  accounts: GatewayAccountQuota[],
+  nowSeconds = Math.floor(Date.now() / 1000),
+  options: QuotaOptions = {}
+): Record<string, string> {
+  return buildCodexQuotaHeaderDetail(accounts, nowSeconds, options).headers;
+}
+
+export function buildCodexQuotaHeaderDetail(
+  accounts: GatewayAccountQuota[],
+  nowSeconds = Math.floor(Date.now() / 1000),
+  options: QuotaOptions = {}
+) {
+  const detail = buildCodexQuotaSnapshotDetail(accounts, nowSeconds, options);
+  const { snapshot, primary, secondary } = detail;
+  const headers = {
+    "x-codex-primary-used-percent": formatHeaderNumber(snapshot.primary.used_percent),
+    "x-codex-primary-window-minutes": String(snapshot.primary.window_minutes),
+    "x-codex-primary-reset-after-seconds": String(snapshot.primary.reset_after_seconds),
+    "x-codex-secondary-used-percent": formatHeaderNumber(snapshot.secondary.used_percent),
+    "x-codex-secondary-window-minutes": String(snapshot.secondary.window_minutes),
+    "x-codex-secondary-reset-after-seconds": String(snapshot.secondary.reset_after_seconds),
+    "x-codex-plan-type": snapshot.plan_type,
+    "x-codex-active-limit": snapshot.active_limit,
+    "x-codex-credits-balance": String(snapshot.credits.balance),
+    "x-codex-credits-has-credits": String(snapshot.credits.has_credits),
+    "x-codex-credits-unlimited": String(snapshot.credits.unlimited)
+  };
+  return { headers, nowSeconds, accountCount: detail.accountCount, primary, secondary };
+}
+
+export function buildCodexQuotaSnapshot(
+  accounts: GatewayAccountQuota[],
+  nowSeconds = Math.floor(Date.now() / 1000),
+  options: QuotaOptions = {}
+): CodexQuotaSnapshot {
+  return buildCodexQuotaSnapshotDetail(accounts, nowSeconds, options).snapshot;
+}
+
+export function buildExternalQuotaHeaders(): Record<string, string> {
+  const snapshot = buildExternalQuotaSnapshot();
+  return {
+    "x-codex-primary-used-percent": "0",
+    "x-codex-primary-window-minutes": String(snapshot.primary.window_minutes),
+    "x-codex-primary-reset-after-seconds": "0",
+    "x-codex-secondary-used-percent": "0",
+    "x-codex-secondary-window-minutes": String(snapshot.secondary.window_minutes),
+    "x-codex-secondary-reset-after-seconds": "0",
+    "x-codex-plan-type": snapshot.plan_type,
+    "x-codex-active-limit": snapshot.active_limit,
+    "x-codex-credits-balance": "0",
+    "x-codex-credits-has-credits": "false",
+    "x-codex-credits-unlimited": "false"
+  };
+}
+
+export function buildExternalQuotaSnapshot(): CodexQuotaSnapshot {
+  return {
+    primary: { used_percent: 0, window_minutes: 300, reset_after_seconds: 0, reset_at: 0 },
+    secondary: { used_percent: 0, window_minutes: 10080, reset_after_seconds: 0, reset_at: 0 },
+    plan_type: "api",
+    active_limit: "none",
+    credits: { balance: 0, has_credits: false, unlimited: false }
+  };
+}
+
+function buildCodexQuotaSnapshotDetail(
+  accounts: GatewayAccountQuota[],
+  nowSeconds: number,
+  options: QuotaOptions = {}
+) {
+  const pool = accounts.filter((account) => account
+    && account.enabled
+    && account.status !== "disabled"
+    && account.access_token);
+  const primary = resetAfterSeconds(pool, "quota_5h_reset_at", nowSeconds);
+  const secondary = resetAfterSeconds(pool, "quota_7d_reset_at", nowSeconds);
+  const ignoreFiveHour = options.ignoreFiveHourLimit === true;
+  const secondaryUsed = roundHeaderPercent(remainingPercent(pool, "quota_7d_used_percent"));
+  const snapshot: CodexQuotaSnapshot = {
+    primary: {
+      used_percent: ignoreFiveHour ? secondaryUsed : roundHeaderPercent(remainingPercent(pool, "quota_5h_used_percent")),
+      window_minutes: ignoreFiveHour ? 10080 : 300,
+      reset_after_seconds: ignoreFiveHour ? secondary.value : primary.value,
+      reset_at: ignoreFiveHour ? (secondary.selected?.reset_at ?? 0) : (primary.selected?.reset_at ?? 0)
+    },
+    secondary: {
+      used_percent: secondaryUsed,
+      window_minutes: 10080,
+      reset_after_seconds: secondary.value,
+      reset_at: secondary.selected?.reset_at ?? 0
+    },
+    plan_type: "unknown",
+    active_limit: ignoreFiveHour ? "secondary" : "primary",
+    credits: { balance: 0, has_credits: false, unlimited: false }
+  };
+  return { snapshot, accountCount: pool.length, primary, secondary };
+}
+
+export function isQuotaExhaustedResponse(status: unknown, body: unknown): boolean {
+  if (![400, 403, 429].includes(Number(status))) return false;
+  const normalized = bodyText(body).toLowerCase();
+  return normalized.includes("rate_limit")
+    || normalized.includes("limit_reached")
+    || normalized.includes("usage_limit")
+    || normalized.includes("quota")
+    || normalized.includes("insufficient_quota")
+    || normalized.includes("too many requests")
+    || normalized.includes("exceeded");
+}
+
+export function isAuthExpiredResponse(status: unknown, body: unknown): boolean {
+  if (![401, 403].includes(Number(status))) return false;
+  const normalized = bodyText(body).toLowerCase();
+  return Number(status) === 401
+    || normalized.includes("invalid_token")
+    || normalized.includes("expired")
+    || normalized.includes("unauthorized")
+    || normalized.includes("authentication");
+}
+
+function applyQuotaHeaderWindow(
+  usage: UsageUpdate,
+  account: GatewayAccountQuota,
+  options: {
+    used: number | null;
+    resetAfter: number | null;
+    usedField: "quota_5h_used_percent" | "quota_7d_used_percent";
+    resetField: "quota_5h_reset_at" | "quota_7d_reset_at";
+    nowSeconds: number;
+  }
+): void {
+  const { used, resetAfter, usedField, resetField, nowSeconds } = options;
+  const hasUsed = Number.isFinite(used);
+  const hasReset = Number.isFinite(resetAfter);
+  const resetSeconds = hasReset ? Math.max(0, Math.trunc(resetAfter as number)) : null;
+  const existingUsed = Number(account[usedField]);
+  const existingResetAt = Number(account[resetField]);
+  const hasExistingPositiveUsage = Number.isFinite(existingUsed) && existingUsed > 0;
+  const hasExistingFutureReset = Number.isFinite(existingResetAt) && existingResetAt > nowSeconds;
+  const isAmbiguousZero = hasUsed
+    && clampPercent(used as number) === 0
+    && (!hasReset || resetSeconds === 0)
+    && (hasExistingPositiveUsage || hasExistingFutureReset);
+
+  if (hasUsed && !isAmbiguousZero) usage[usedField] = clampPercent(used as number);
+  if (hasReset && resetSeconds !== null && resetSeconds > 0) usage[resetField] = nowSeconds + resetSeconds;
+}
+
+function numberHeader(headers: HeaderSource | HeaderRecord, name: string): number | null {
+  const raw = headerGet(headers, name);
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function headerGet(headers: HeaderSource | HeaderRecord, name: string): unknown {
+  if (typeof (headers as HeaderSource).get === "function") return (headers as HeaderSource).get?.(name) ?? null;
+  const lower = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === lower) return Array.isArray(value) ? value[0] : value;
+  }
+  return null;
+}
+
+function remainingPercent(accounts: GatewayAccountQuota[], field: keyof GatewayAccountQuota): number {
+  const remaining = accounts
+    .map((account) => Number(account[field]))
+    .filter((value) => Number.isFinite(value))
+    .reduce((sum, value) => sum + Math.max(0, 100 - clampPercent(value)), 0);
+  return 100 - Math.min(100, remaining);
+}
+
+function resetAfterSeconds(
+  accounts: GatewayAccountQuota[],
+  field: keyof GatewayAccountQuota,
+  nowSeconds: number
+): ResetDetail {
+  let nearest: ResetCandidate | null = null;
+  const candidates: ResetCandidate[] = [];
+  for (const account of accounts) {
+    const resetAt = Number(account[field]);
+    if (!Number.isFinite(resetAt) || resetAt <= 0) continue;
+    const item: ResetCandidate = {
+      id: account.id,
+      email: account.email || account.name || account.id,
+      reset_at: resetAt,
+      reset_after_seconds: Math.max(0, Math.trunc(resetAt - nowSeconds))
+    };
+    candidates.push(item);
+    if (nearest === null || resetAt < nearest.reset_at) nearest = item;
+  }
+  return { value: nearest?.reset_after_seconds ?? 0, selected: nearest, candidates };
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatHeaderNumber(value: number): string {
+  const rounded = roundHeaderPercent(value);
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function roundHeaderPercent(value: number): number {
+  return Math.round(clampPercent(value) * 10) / 10;
+}
+
+function bodyText(body: unknown): string {
+  return Buffer.isBuffer(body)
+    ? body.toString("utf8", 0, Math.min(body.length, 4096))
+    : String(body || "");
+}
