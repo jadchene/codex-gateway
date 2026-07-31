@@ -1,4 +1,4 @@
-import { CopyOutlined, SearchOutlined, SettingOutlined } from "@ant-design/icons";
+import { CopyOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   Button,
@@ -75,6 +75,10 @@ export const RequestAnalyticsPage = ({
   const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters): Promise<void> => {
     setFilters(nextFilters);
     await onQuery(toLogQuery(nextFilters, page, pageSize));
+  };
+
+  const resetFilters = async (): Promise<void> => {
+    await runQuery(1, pageData.pageSize, todayLogFilters());
   };
 
   const copyValue = async (value: unknown): Promise<void> => {
@@ -216,6 +220,7 @@ export const RequestAnalyticsPage = ({
             />
           </div>
           <Button type="primary" icon={<SearchOutlined />} onClick={() => runQuery(1)}>查询</Button>
+          <Button icon={<ReloadOutlined />} onClick={resetFilters}>重置</Button>
         </Flex>
 
         <div className="v1-metric-grid">

@@ -177,14 +177,11 @@ async function inspectLazyPages(webSocketDebuggerUrl, processHandle) {
   const pages = [
     ["overview", "运行概览"],
     ["accounts", "订阅账号"],
-    ["upstreams", "API 上游"],
-    ["modelMappings", "模型映射"],
-    ["routingPolicies", "默认路由策略"],
+    ["upstreams", "模型渠道"],
     ["services", "服务管理"],
     ["analytics", "调用分析"],
-    ["sessions", "会话管理"],
     ["runtimeLogs", "运行日志"],
-    ["codexIntegration", "CLI 接入"],
+    ["codexIntegration", "接入模式"],
     ["settings", "设置中心"]
   ];
   for (const [route, expectedText] of pages) {

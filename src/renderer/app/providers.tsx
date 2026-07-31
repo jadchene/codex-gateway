@@ -1,6 +1,8 @@
 import { App, ConfigProvider, theme } from "antd";
 import type { PropsWithChildren } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import dayjs from "dayjs";
+import "dayjs/locale/zh-cn";
 import { queryClient } from "./query-client";
 import zhCN from "antd/locale/zh_CN";
 import { useEffect, useMemo, useState } from "react";
@@ -9,6 +11,8 @@ import {
   loadAppearancePreferences,
   type AppearancePreferences
 } from "./appearance";
+
+dayjs.locale("zh-cn");
 
 export const AppProviders = ({ children }: PropsWithChildren) => {
   const [appearance, setAppearance] = useState(loadAppearancePreferences);

@@ -19,11 +19,11 @@ const RuntimeLogsPage = React.lazy(() => import("./features/runtime-logs/Runtime
 const pages = [
   { id: "overview", label: "概览" },
   { id: "accounts", label: "订阅账号" },
-  { id: "upstreams", label: "API 上游" },
+  { id: "upstreams", label: "模型渠道" },
   { id: "services", label: "服务管理" },
   { id: "analytics", label: "调用分析" },
   { id: "runtimeLogs", label: "运行日志" },
-  { id: "codexIntegration", label: "CLI 接入" },
+  { id: "codexIntegration", label: "接入模式" },
   { id: "settings", label: "设置中心" }
 ];
 

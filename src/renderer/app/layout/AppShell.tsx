@@ -12,7 +12,7 @@ import {
 } from "@ant-design/icons";
 import { Button, Flex, Layout, Menu, Space, Tag, Typography } from "antd";
 import type { MenuProps } from "antd";
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 const { Header, Content, Sider } = Layout;
@@ -33,16 +33,16 @@ interface AppShellProps extends PropsWithChildren {
   pages: PageDefinition[];
 }
 
-const navigationItems: MenuProps["items"] = [
-  { key: "overview", icon: <DashboardOutlined />, label: "概览" },
-  { key: "accounts", icon: <TeamOutlined />, label: "订阅账号" },
-  { key: "upstreams", icon: <ApiOutlined />, label: "API 上游" },
-  { key: "services", icon: <CloudServerOutlined />, label: "服务管理" },
-  { key: "analytics", icon: <BarChartOutlined />, label: "调用分析" },
-  { key: "runtimeLogs", icon: <FileSearchOutlined />, label: "运行日志" },
-  { key: "codexIntegration", icon: <KeyOutlined />, label: "CLI 接入" },
-  { key: "settings", icon: <SettingOutlined />, label: "设置中心" }
-];
+const navigationIcons: Record<string, ReactNode> = {
+  overview: <DashboardOutlined />,
+  accounts: <TeamOutlined />,
+  upstreams: <ApiOutlined />,
+  services: <CloudServerOutlined />,
+  analytics: <BarChartOutlined />,
+  runtimeLogs: <FileSearchOutlined />,
+  codexIntegration: <KeyOutlined />,
+  settings: <SettingOutlined />
+};
 
 export const AppShell = ({
   activePage,
@@ -56,6 +56,10 @@ export const AppShell = ({
   pages
 }: AppShellProps) => {
   const [collapsed, setCollapsed] = useState(initiallyCollapsed);
+  const navigationItems = useMemo<NonNullable<MenuProps["items"]>>(
+    () => pages.map((page) => ({ key: page.id, icon: navigationIcons[page.id], label: page.label })),
+    [pages]
+  );
   const title = useMemo(
     () => pages.find((page) => page.id === activePage)?.label ?? "Codex Gateway",
     [activePage, pages]

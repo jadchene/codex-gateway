@@ -5,6 +5,8 @@ import type { ReactElement } from "react";
 import { App as AntApp } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodexGatewayBridge } from "../../preload";
+import type { UpstreamKind, UpstreamSummary } from "../../shared/contracts/upstreams";
+import { AppShell } from "../app/layout/AppShell";
 import { AccountsPage } from "./accounts/AccountsPage";
 import { CodexIntegrationPage } from "./codex-integration/CodexIntegrationPage";
 import { OverviewPage } from "./overview/OverviewPage";
@@ -23,6 +25,25 @@ describe("Ant Design pages", () => {
     Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
   });
   afterEach(() => cleanup());
+
+  it("uses the page definitions for navigation and the current page title", () => {
+    render(
+      <AppShell
+        activePage="upstreams"
+        gatewayRunning={false}
+        mcpGatewayRunning={false}
+        onNavigate={vi.fn()}
+        pages={[
+          { id: "upstreams", label: "模型渠道" },
+          { id: "codexIntegration", label: "接入模式" }
+        ]}
+      >
+        <div>页面内容</div>
+      </AppShell>
+    );
+    expect(screen.getAllByText("模型渠道")).toHaveLength(2);
+    expect(screen.getByText("接入模式")).toBeTruthy();
+  });
 
   it("renders overview model channel metrics", async () => {
     renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} mcpGateway={{ running: false }} tokenSummary={emptySummary} quotaSummary={{ primary: {}, secondary: {} }} settings={{}} />);
@@ -52,6 +73,16 @@ describe("Ant Design pages", () => {
     expect(screen.getByText(/工具、推理程度、输入模态和 WS/)).toBeTruthy();
     expect((document.querySelector("textarea.v1-code-editor") as HTMLTextAreaElement | null)?.value).toBe("");
     expect(screen.queryByText("模型映射")).toBeNull();
+  });
+
+  it("hides the delete action for the built-in account channel", async () => {
+    vi.mocked(window.codexGateway.listUpstreams).mockResolvedValue([
+      createUpstream("builtin", "内置账号渠道", "chatgpt_subscription_pool"),
+      createUpstream("api", "第三方渠道", "responses_api")
+    ]);
+    renderWithQueries(<UpstreamsPage />);
+    expect(await screen.findByText("内置账号渠道")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "删除" })).toHaveLength(1);
   });
 
   it("starts the gateway from service management", async () => {
@@ -95,14 +126,21 @@ describe("Ant Design pages", () => {
     expect(await screen.findByText("缓存命中率：40.0%")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /查询/ }));
     expect(onQuery).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: /重置/ }));
+    expect(onQuery).toHaveBeenCalledTimes(2);
+    expect(onQuery.mock.calls[1]?.[0]).not.toHaveProperty("accountId");
   });
 
   it("pauses runtime logs", async () => {
     const user = userEvent.setup();
     const onPausedChange = vi.fn();
-    render(<RuntimeLogsPage pageData={emptyLogPage} paused={false} newLogCount={0} onPausedChange={onPausedChange} onMessage={vi.fn()} onQuery={vi.fn()} />);
+    const onQuery = vi.fn().mockResolvedValue(undefined);
+    render(<RuntimeLogsPage pageData={emptyLogPage} paused={false} newLogCount={0} onPausedChange={onPausedChange} onMessage={vi.fn()} onQuery={onQuery} />);
     await user.click(screen.getByRole("button", { name: /暂停自动刷新/ }));
     expect(onPausedChange).toHaveBeenCalledWith(true);
+    await user.click(screen.getByRole("button", { name: /重置/ }));
+    expect(onQuery).toHaveBeenCalledOnce();
+    expect(onQuery.mock.calls[0]?.[0]).not.toHaveProperty("keyword");
   });
 
   it("applies Codex gateway mode", async () => {
@@ -110,6 +148,7 @@ describe("Ant Design pages", () => {
     const onApplyGateway = vi.fn().mockResolvedValue(undefined);
     render(<CodexIntegrationPage settings={{ codex_auth_mode: "" }} accounts={[]} gatewayBase="http://localhost:8436/v1" modelCatalogPath="D:/data/models.json"
       onMessage={vi.fn()} onApplyGateway={onApplyGateway} onApplyAccount={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "接入模式" })).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /网关模式/ }));
     expect(screen.getByText(/model_catalog_json = "D:\/data\/models\.json"/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
@@ -129,3 +168,41 @@ function createBridge(): CodexGatewayBridge {
     bootstrap: vi.fn().mockResolvedValue({ settings: { billing_currency: "USD" } })
   } as unknown as CodexGatewayBridge;
 }
+
+const createUpstream = (id: string, name: string, kind: UpstreamKind): UpstreamSummary => ({
+  id,
+  name,
+  kind,
+  enabled: true,
+  baseUrl: "http://localhost:8436/v1",
+  hasApiKey: kind === "responses_api",
+  apiKeyFingerprint: null,
+  supportsWebSocket: true,
+  publicHeaders: {},
+  secretHeaders: [],
+  balanceQueryType: "none",
+  balance: {
+    available: true,
+    infos: [],
+    summary: null,
+    checkedAt: null,
+    error: null,
+    subscriptionPool: kind === "chatgpt_subscription_pool"
+      ? {
+        totalAccounts: 1,
+        enabledAccounts: 1,
+        availableAccounts: 1,
+        quotaCapacityPercent: 100,
+        fiveHourRemainingPercent: 100,
+        sevenDayRemainingPercent: 100,
+        resetCredits: 0
+      }
+      : null
+  },
+  healthStatus: "unknown",
+  healthCheckedAt: null,
+  healthLatencyMs: null,
+  healthMessage: null,
+  modelCount: 1,
+  lastSyncedAt: null
+});

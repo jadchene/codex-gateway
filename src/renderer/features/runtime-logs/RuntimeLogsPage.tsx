@@ -1,4 +1,4 @@
-import { CopyOutlined, PauseOutlined, PlayCircleOutlined, SearchOutlined } from "@ant-design/icons";
+import { CopyOutlined, PauseOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { Button, Card, DatePicker, Descriptions, Drawer, Empty, Flex, Input, Pagination, Select, Space, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 import { useState } from "react";
@@ -19,8 +19,13 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
   const [filters, setFilters] = useState<LogFilterValues>(todayLogFilters);
   const [selectedLog, setSelectedLog] = useState<AppLog | null>(null);
 
-  const runQuery = async (page = 1, pageSize = pageData.pageSize): Promise<void> => {
-    await onQuery(toLogQuery(filters, page, pageSize));
+  const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters): Promise<void> => {
+    setFilters(nextFilters);
+    await onQuery(toLogQuery(nextFilters, page, pageSize));
+  };
+
+  const resetFilters = async (): Promise<void> => {
+    await runQuery(1, pageData.pageSize, todayLogFilters());
   };
 
   const copyJson = async (log: AppLog): Promise<void> => {
@@ -94,6 +99,7 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
           <Input value={filters.keyword} placeholder="消息、动作或模块" style={{ width: 220 }} onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value }))} />
         </div>
         <Button type="primary" icon={<SearchOutlined />} onClick={() => runQuery(1)}>查询</Button>
+        <Button icon={<ReloadOutlined />} onClick={resetFilters}>重置</Button>
       </Flex>
 
       <Table

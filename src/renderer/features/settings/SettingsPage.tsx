@@ -180,7 +180,7 @@ export const SettingsPage = ({
 
   const gatewayTab = (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <SettingsSection title="本地监听" description="Codex 只连接本地网关；API 上游凭据在“API 上游”页面单独管理。">
+      <SettingsSection title="本地监听" description="Codex 只连接本地网关；API 上游凭据在“模型渠道”页面单独管理。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <Form.Item name="gateway_host" label="监听地址" rules={[{ required: true }]}>
             <Input placeholder="127.0.0.1" />

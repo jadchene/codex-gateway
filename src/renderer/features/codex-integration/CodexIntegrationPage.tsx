@@ -56,7 +56,7 @@ export const CodexIntegrationPage = ({
     <Card className="v1-page-card" variant="borderless">
       <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
         <div>
-          <Typography.Title level={4}>CLI 接入</Typography.Title>
+          <Typography.Title level={4}>接入模式</Typography.Title>
           <Typography.Text type="secondary">Codex 可以固定使用本地统一网关，也可以临时切换为某个订阅账号直连。</Typography.Text>
         </div>
         {settings.codex_auth_mode && <Tag color="success" icon={<CheckCircleOutlined />}>当前：{settings.codex_auth_mode === "gateway" ? "网关模式" : "账号模式"}</Tag>}

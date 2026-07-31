@@ -246,9 +246,11 @@ export const UpstreamsPage = () => {
         <Tooltip title={upstream.kind === "chatgpt_subscription_pool" ? "编辑模型费率" : "编辑上游"}>
           <Button aria-label="编辑" icon={<EditOutlined />} onClick={() => void (upstream.kind === "chatgpt_subscription_pool" ? openPricing(upstream) : openEdit(upstream))} />
         </Tooltip>
-        <Popconfirm title={`删除“${upstream.name}”？`} disabled={upstream.kind === "chatgpt_subscription_pool"} onConfirm={() => deleteMutation.mutate(upstream.id)}>
-          <Button danger icon={<DeleteOutlined />} disabled={upstream.kind === "chatgpt_subscription_pool"} aria-label="删除" />
-        </Popconfirm>
+        {upstream.kind === "responses_api" && (
+          <Popconfirm title={`删除“${upstream.name}”？`} onConfirm={() => deleteMutation.mutate(upstream.id)}>
+            <Button danger icon={<DeleteOutlined />} aria-label="删除" />
+          </Popconfirm>
+        )}
         <Dropdown menu={{ items: moreItems(upstream), onClick: ({ key }) => onMore(upstream, key) }} trigger={["click"]}>
           <Button loading={upstream.kind === "chatgpt_subscription_pool" && bundledMutation.isPending} icon={<MoreOutlined />} aria-label="更多操作" />
         </Dropdown>
