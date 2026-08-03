@@ -8,6 +8,7 @@ import { buildMcpGatewayCommand, mcpGatewayPath, mcpGatewayUrl } from "../src/ma
 import {
   buildCodexQuotaHeaders,
   buildCodexQuotaSnapshot,
+  buildAccountPoolQuotaSummary,
   buildGatewayRequest,
   buildUpstreamHeaders,
   buildUpstreamUrl,
@@ -310,12 +311,31 @@ test("buildCodexQuotaSnapshot uses the same aggregate as response headers", () =
 });
 
 test("buildCodexQuotaHeaders caps stacked remaining quota before subtraction", () => {
-  const headers = buildCodexQuotaHeaders([
+  const accounts = [
     { enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 80, quota_5h_reset_at: 100 },
     { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 50, quota_5h_reset_at: 200 }
-  ], 500);
+  ];
+  const headers = buildCodexQuotaHeaders(accounts, 500);
+  const summary = buildAccountPoolQuotaSummary(accounts, 500);
   assert.equal(headers["x-codex-primary-used-percent"], "30");
+  assert.equal(summary.capacity_percent, 200);
+  assert.equal(summary.primary.remaining_percent, 70);
   assert.equal(headers["x-codex-primary-reset-after-seconds"], "0");
+});
+
+test("application quota summary keeps remaining capacity above 100 while response headers cap it", () => {
+  const accounts = [
+    { enabled: true, status: "active", access_token: "a", quota_5h_used_percent: 10, quota_7d_used_percent: 20 },
+    { enabled: true, status: "active", access_token: "b", quota_5h_used_percent: 20, quota_7d_used_percent: 30 }
+  ];
+  const headers = buildCodexQuotaHeaders(accounts, 500);
+  const summary = buildAccountPoolQuotaSummary(accounts, 500);
+
+  assert.equal(summary.capacity_percent, 200);
+  assert.equal(summary.primary.remaining_percent, 170);
+  assert.equal(summary.secondary.remaining_percent, 150);
+  assert.equal(headers["x-codex-primary-used-percent"], "0");
+  assert.equal(headers["x-codex-secondary-used-percent"], "0");
 });
 
 test("buildCodexQuotaHeaders subtracts stacked remaining quota from 100", () => {

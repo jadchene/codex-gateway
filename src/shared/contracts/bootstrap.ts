@@ -15,7 +15,7 @@ export interface BootstrapData {
   accounts: PublicAccount[];
   tokenLogs: RequestLogPage;
   tokenSummary: TokenSummary;
-  quotaSummary: { primary?: QuotaDetail; secondary?: QuotaDetail };
+  quotaSummary: { capacity_percent?: number; primary?: QuotaDetail; secondary?: QuotaDetail };
   appLogs: AppLogPage;
   gateway: ServiceStatus;
   mcpGateway: ServiceStatus;

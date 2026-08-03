@@ -164,7 +164,11 @@ async function waitForRenderer(webSocketDebuggerUrl, processHandle) {
     }
     try {
       const result = await inspectRenderer(webSocketDebuggerUrl);
-      if (result?.bridgeReady && result.rootChildCount > 0) return result;
+      if (result?.bridgeReady
+        && result.rootChildCount > 0
+        && result.shellHeight > 0
+        && result.contentOverflowY
+        && result.navigationOverflowY) return result;
     } catch (error) {
       lastError = error;
     }

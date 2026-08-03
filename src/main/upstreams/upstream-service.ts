@@ -11,6 +11,7 @@ import type {
   UpstreamModel,
   UpstreamSummary
 } from "../../shared/contracts/upstreams";
+import { buildAccountPoolQuotaSummary } from "../gateway/quota.ts";
 import { estimateUpstreamCost } from "./cost-estimator.ts";
 
 export const BUILTIN_SUBSCRIPTION_ID = "builtin-chatgpt-subscription-pool";
@@ -444,17 +445,19 @@ function publicUpstream(db: DatabaseSync, row: SqlRow, secretCodec: SecretCodec)
 
 function subscriptionPoolBalance(db: DatabaseSync) {
   const accounts = db.prepare(`
-    SELECT enabled, status, quota_5h_used_percent, quota_7d_used_percent,
+    SELECT id, access_token, enabled, status, quota_5h_used_percent, quota_5h_reset_at,
+      quota_7d_used_percent, quota_7d_reset_at,
       reset_credits_available_count FROM accounts
   `).all() as SqlRow[];
   const enabledAccounts = accounts.filter((account) => Boolean(account.enabled) && account.status !== "disabled");
   const available = accounts.filter((account) => Boolean(account.enabled) && account.status === "active").length;
   const credits = enabledAccounts.reduce((total, account) => total + Math.max(0, Number(account.reset_credits_available_count || 0)), 0);
-  const remaining = (field: "quota_5h_used_percent" | "quota_7d_used_percent") => enabledAccounts.reduce(
-    (total, account) => total + Math.max(0, 100 - Math.max(0, Number(account[field] || 0))),
-    0
-  );
   const ignoreFiveHour = String((db.prepare("SELECT value FROM settings WHERE key = ?").get("ignore_five_hour_limit") as SqlRow | undefined)?.value || "false") === "true";
+  const quota = buildAccountPoolQuotaSummary(accounts.map((account) => ({
+    ...account,
+    id: String(account.id || ""),
+    access_token: String(account.access_token || "")
+  })), undefined, { ignoreFiveHourLimit: ignoreFiveHour });
   const total = accounts.length;
   return {
     available: available > 0,
@@ -466,9 +469,9 @@ function subscriptionPoolBalance(db: DatabaseSync) {
       totalAccounts: total,
       enabledAccounts: enabledAccounts.length,
       availableAccounts: available,
-      quotaCapacityPercent: enabledAccounts.length * 100,
-      fiveHourRemainingPercent: ignoreFiveHour ? null : remaining("quota_5h_used_percent"),
-      sevenDayRemainingPercent: remaining("quota_7d_used_percent"),
+      quotaCapacityPercent: quota.capacity_percent,
+      fiveHourRemainingPercent: ignoreFiveHour ? null : quota.primary.remaining_percent,
+      sevenDayRemainingPercent: quota.secondary.remaining_percent,
       resetCredits: credits
     }
   };

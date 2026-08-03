@@ -188,9 +188,18 @@ function App() {
 
   async function saveSettings(next: Settings): Promise<Settings> {
     try {
+      const quotaModeChanged = next.ignore_five_hour_limit !== settings.ignore_five_hour_limit;
       const saved = await api.saveSettings(next);
       setSettings(saved);
       applyAppearancePreferences(appearanceFromSettings(saved));
+      if (quotaModeChanged) {
+        try {
+          setQuotaSummary(await api.quotaSummary());
+        } catch (error) {
+          setMessage(`配置已保存，但额度汇总刷新失败：${errorMessage(error)}`);
+          return saved;
+        }
+      }
       setMessage("配置已保存");
       return saved;
     } catch (error) {

@@ -12,7 +12,7 @@ import { createStore } from "./store.ts";
 import { createSecretCodec } from "./secret-codec.ts";
 import { editableSettingsPatch, isTrustedRendererUrl, publicAccount, publicSettings } from "./renderer-boundary.ts";
 import { createUsageRefreshCoordinator } from "./usage-refresh-coordinator.ts";
-import { createGateway, buildCodexQuotaHeaderDetail } from "./gateway.ts";
+import { createGateway, buildAccountPoolQuotaSummary } from "./gateway.ts";
 import { createMcpGatewayService } from "./mcp-gateway-service.ts";
 import { createUpstreamService } from "./upstreams/upstream-service.ts";
 import { createCodexModelCatalogService } from "./codex-model-catalog.ts";
@@ -520,21 +520,9 @@ function publicAccounts() {
 
 function gatewayQuotaSummary() {
   const settings = store.getSettings();
-  const detail = buildCodexQuotaHeaderDetail(store.listAccounts(), undefined, { ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true" });
-  const primaryUsed = Number(detail.headers["x-codex-primary-used-percent"] || 0);
-  const secondaryUsed = Number(detail.headers["x-codex-secondary-used-percent"] || 0);
-  return {
-    primary: {
-      remaining_percent: Math.max(0, Math.min(100, 100 - primaryUsed)),
-      reset_after_seconds: detail.primary.value,
-      reset_at: detail.primary.selected?.reset_at || 0
-    },
-    secondary: {
-      remaining_percent: Math.max(0, Math.min(100, 100 - secondaryUsed)),
-      reset_after_seconds: detail.secondary.value,
-      reset_at: detail.secondary.selected?.reset_at || 0
-    }
-  };
+  return buildAccountPoolQuotaSummary(store.listAccounts(), undefined, {
+    ignoreFiveHourLimit: settings.ignore_five_hour_limit === "true"
+  });
 }
 
 async function startGateway(reason: Dynamic = "manual") {

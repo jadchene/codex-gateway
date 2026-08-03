@@ -72,6 +72,20 @@ export interface CodexQuotaSnapshot {
   };
 }
 
+export interface AccountPoolQuotaSummary {
+  capacity_percent: number;
+  primary: {
+    remaining_percent: number;
+    reset_after_seconds: number;
+    reset_at: number;
+  };
+  secondary: {
+    remaining_percent: number;
+    reset_after_seconds: number;
+    reset_at: number;
+  };
+}
+
 export function syncAccountUsageFromHeaders(
   account: GatewayAccountQuota | null | undefined,
   headers: HeaderSource | HeaderRecord | null | undefined,
@@ -157,6 +171,14 @@ export function buildCodexQuotaSnapshot(
   return buildCodexQuotaSnapshotDetail(accounts, nowSeconds, options).snapshot;
 }
 
+export function buildAccountPoolQuotaSummary(
+  accounts: GatewayAccountQuota[],
+  nowSeconds = Math.floor(Date.now() / 1000),
+  options: QuotaOptions = {}
+): AccountPoolQuotaSummary {
+  return buildAccountPoolQuotaDetail(accounts, nowSeconds, options).summary;
+}
+
 export function buildExternalQuotaHeaders(): Record<string, string> {
   const snapshot = buildExternalQuotaSnapshot();
   return {
@@ -189,6 +211,37 @@ function buildCodexQuotaSnapshotDetail(
   nowSeconds: number,
   options: QuotaOptions = {}
 ) {
+  const detail = buildAccountPoolQuotaDetail(accounts, nowSeconds, options);
+  const { pool, primary, secondary, summary } = detail;
+  const ignoreFiveHour = options.ignoreFiveHourLimit === true;
+  const secondaryUsed = roundHeaderPercent(protocolUsedPercent(summary.secondary.remaining_percent));
+  const snapshot: CodexQuotaSnapshot = {
+    primary: {
+      used_percent: ignoreFiveHour
+        ? secondaryUsed
+        : roundHeaderPercent(protocolUsedPercent(summary.primary.remaining_percent)),
+      window_minutes: ignoreFiveHour ? 10080 : 300,
+      reset_after_seconds: summary.primary.reset_after_seconds,
+      reset_at: summary.primary.reset_at
+    },
+    secondary: {
+      used_percent: secondaryUsed,
+      window_minutes: 10080,
+      reset_after_seconds: summary.secondary.reset_after_seconds,
+      reset_at: summary.secondary.reset_at
+    },
+    plan_type: "unknown",
+    active_limit: ignoreFiveHour ? "secondary" : "primary",
+    credits: { balance: 0, has_credits: false, unlimited: false }
+  };
+  return { snapshot, accountCount: pool.length, primary, secondary };
+}
+
+function buildAccountPoolQuotaDetail(
+  accounts: GatewayAccountQuota[],
+  nowSeconds: number,
+  options: QuotaOptions
+) {
   const pool = accounts.filter((account) => account
     && account.enabled
     && account.status !== "disabled"
@@ -196,25 +249,23 @@ function buildCodexQuotaSnapshotDetail(
   const primary = resetAfterSeconds(pool, "quota_5h_reset_at", nowSeconds);
   const secondary = resetAfterSeconds(pool, "quota_7d_reset_at", nowSeconds);
   const ignoreFiveHour = options.ignoreFiveHourLimit === true;
-  const secondaryUsed = roundHeaderPercent(remainingPercent(pool, "quota_7d_used_percent"));
-  const snapshot: CodexQuotaSnapshot = {
+  const secondaryRemaining = roundDisplayPercent(totalRemainingPercent(pool, "quota_7d_used_percent"));
+  const summary: AccountPoolQuotaSummary = {
+    capacity_percent: pool.length * 100,
     primary: {
-      used_percent: ignoreFiveHour ? secondaryUsed : roundHeaderPercent(remainingPercent(pool, "quota_5h_used_percent")),
-      window_minutes: ignoreFiveHour ? 10080 : 300,
+      remaining_percent: ignoreFiveHour
+        ? secondaryRemaining
+        : roundDisplayPercent(totalRemainingPercent(pool, "quota_5h_used_percent")),
       reset_after_seconds: ignoreFiveHour ? secondary.value : primary.value,
       reset_at: ignoreFiveHour ? (secondary.selected?.reset_at ?? 0) : (primary.selected?.reset_at ?? 0)
     },
     secondary: {
-      used_percent: secondaryUsed,
-      window_minutes: 10080,
+      remaining_percent: secondaryRemaining,
       reset_after_seconds: secondary.value,
       reset_at: secondary.selected?.reset_at ?? 0
-    },
-    plan_type: "unknown",
-    active_limit: ignoreFiveHour ? "secondary" : "primary",
-    credits: { balance: 0, has_credits: false, unlimited: false }
+    }
   };
-  return { snapshot, accountCount: pool.length, primary, secondary };
+  return { pool, primary, secondary, summary };
 }
 
 export function isQuotaExhaustedResponse(status: unknown, body: unknown): boolean {
@@ -283,12 +334,15 @@ function headerGet(headers: HeaderSource | HeaderRecord, name: string): unknown 
   return null;
 }
 
-function remainingPercent(accounts: GatewayAccountQuota[], field: keyof GatewayAccountQuota): number {
-  const remaining = accounts
+function totalRemainingPercent(accounts: GatewayAccountQuota[], field: keyof GatewayAccountQuota): number {
+  return accounts
     .map((account) => Number(account[field]))
     .filter((value) => Number.isFinite(value))
     .reduce((sum, value) => sum + Math.max(0, 100 - clampPercent(value)), 0);
-  return 100 - Math.min(100, remaining);
+}
+
+function protocolUsedPercent(totalRemaining: number): number {
+  return 100 - Math.min(100, Math.max(0, totalRemaining));
 }
 
 function resetAfterSeconds(
@@ -324,6 +378,10 @@ function formatHeaderNumber(value: number): string {
 
 function roundHeaderPercent(value: number): number {
   return Math.round(clampPercent(value) * 10) / 10;
+}
+
+function roundDisplayPercent(value: number): number {
+  return Math.round(Math.max(0, value) * 10) / 10;
 }
 
 function bodyText(body: unknown): string {

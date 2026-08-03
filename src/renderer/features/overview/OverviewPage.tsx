@@ -29,6 +29,7 @@ interface OverviewPageProps {
   mcpGateway: { running?: boolean; url?: string };
   tokenSummary: TokenSummary;
   quotaSummary: {
+    capacity_percent?: number;
     primary?: QuotaDetail;
     secondary?: QuotaDetail;
   };
@@ -98,10 +99,10 @@ export const OverviewPage = ({
 
       <Row gutter={[16, 16]}>
         {settings.ignore_five_hour_limit !== "true" && (
-          <Col xs={24} xl={12}><QuotaCard title="5 小时剩余额度" detail={quotaSummary.primary} /></Col>
+          <Col xs={24} xl={12}><QuotaCard title="5 小时剩余额度" detail={quotaSummary.primary} capacity={quotaSummary.capacity_percent} /></Col>
         )}
         <Col xs={24} xl={settings.ignore_five_hour_limit === "true" ? 24 : 12}>
-          <QuotaCard title="7 天剩余额度" detail={quotaSummary.secondary} />
+          <QuotaCard title="7 天剩余额度" detail={quotaSummary.secondary} capacity={quotaSummary.capacity_percent} />
         </Col>
       </Row>
 
@@ -150,8 +151,9 @@ const MetricCard = ({
   </Col>
 );
 
-const QuotaCard = ({ title, detail }: { title: string; detail: QuotaDetail | undefined }) => {
-  const remaining = Math.max(0, Math.min(100, Number(detail?.remaining_percent || 0)));
+const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDetail | undefined; capacity: number | undefined }) => {
+  const remaining = Math.max(0, Number(detail?.remaining_percent || 0));
+  const progress = Math.max(0, Math.min(100, remaining / Math.max(1, Number(capacity || 100)) * 100));
   return (
     <Card className="v1-overview-card">
       <Flex align="center" justify="space-between" gap={16}>
@@ -160,7 +162,7 @@ const QuotaCard = ({ title, detail }: { title: string; detail: QuotaDetail | und
           <Typography.Title level={3}>{remaining.toFixed(1)}%</Typography.Title>
           <Typography.Text type="secondary">重置：{formatTime(detail?.reset_at)}</Typography.Text>
         </div>
-        <Progress type="dashboard" percent={remaining} size={92} strokeColor={remaining < 20 ? "#dc2626" : "#2563eb"} />
+        <Progress type="dashboard" percent={progress} size={92} strokeColor={progress < 20 ? "#dc2626" : "#2563eb"} />
       </Flex>
     </Card>
   );
