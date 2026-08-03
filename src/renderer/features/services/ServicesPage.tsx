@@ -70,7 +70,7 @@ export const ServicesPage = ({
       <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
         <div>
           <Typography.Title level={4}>服务管理</Typography.Title>
-          <Typography.Text type="secondary">独立查看和控制 Codex Gateway 与 MCP Gateway，不把运行状态混入系统设置。</Typography.Text>
+          <Typography.Text type="secondary">启动、停止或重启本地网关服务。</Typography.Text>
         </div>
       </Flex>
       <div className="v1-service-grid">
@@ -82,7 +82,7 @@ export const ServicesPage = ({
           onRestart={() => restart("gateway")}
         >
           <Descriptions column={1} size="small" items={[
-            { key: "base", label: "Base URL", children: <CopyableValue value={gatewayBase} onCopy={() => copy("Base URL", gatewayBase)} /> }
+            { key: "base", label: "服务地址", children: <CopyableValue value={gatewayBase} onCopy={() => copy("服务地址", gatewayBase)} /> }
           ]} />
           {gateway.error && <Alert showIcon type="error" title="最近错误" description={gateway.error} />}
         </ServiceCard>

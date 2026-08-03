@@ -349,7 +349,8 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
     pending?.dispose();
     upstream?.terminate();
     if (downstream && downstream.readyState === WebSocket.OPEN) {
-      if (error.reconnectRequired) closeWebSocketForReconnect(downstream, "retry model transport");
+      if (Number(error.statusCode) === 426) sendWebSocketHttpFallbackAndClose(downstream, error.code, publicPostUpgradeError(error));
+      else if (error.reconnectRequired) closeWebSocketForReconnect(downstream, "retry model transport");
       else sendWebSocketErrorAndClose(downstream, error.code || "WEBSOCKET_ROUTE_FAILED", publicPostUpgradeError(error));
     } else if (!socket.destroyed) {
       rejectUpgrade(socket, Number(error.statusCode || 502), publicUpgradeError(error));
@@ -371,9 +372,7 @@ async function selectDeferredResponsesRoute(options: Dynamic) {
   const upstream = modelId ? hooks.upstreamService?.findRuntimeByModel?.(modelId) : null;
   if (upstream) {
     if (!upstream.supportsWebSocket) {
-      const error = routeError(426, "WEBSOCKET_RECONNECT_REQUIRED", "The selected model upstream does not support WebSocket. Reconnect so the client can retry over HTTP.");
-      error.reconnectRequired = true;
-      throw error;
+      throw routeError(426, "WEBSOCKET_NOT_SUPPORTED", "The selected model upstream supports HTTP transport only.");
     }
     const started = Date.now();
     try {
@@ -817,6 +816,24 @@ function sendWebSocketErrorAndClose(websocket: Dynamic, code: Dynamic, message: 
     if (websocket.readyState !== WebSocket.OPEN) return;
     if (error) websocket.terminate();
     else websocket.close(1008, "route rejected");
+  });
+}
+
+function sendWebSocketHttpFallbackAndClose(websocket: Dynamic, code: Dynamic, message: Dynamic) {
+  if (websocket.readyState !== WebSocket.OPEN) return;
+  const payload = JSON.stringify({
+    type: "error",
+    status: 426,
+    error: {
+      type: "unsupported_transport",
+      code: String(code || "WEBSOCKET_NOT_SUPPORTED"),
+      message: String(message || "The selected model upstream supports HTTP transport only.").slice(0, 1000)
+    }
+  });
+  websocket.send(payload, (error: Dynamic) => {
+    if (websocket.readyState !== WebSocket.OPEN) return;
+    if (error) websocket.terminate();
+    else websocket.close(1008, "HTTP transport required");
   });
 }
 

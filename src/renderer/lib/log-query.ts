@@ -1,5 +1,5 @@
 import dayjs, { type Dayjs } from "dayjs";
-import type { LogQuery } from "../../shared/contracts/logs";
+import type { AppLogPage, LogQuery, RequestLogPage } from "../../shared/contracts/logs";
 
 export interface LogFilterValues {
   range: [Dayjs, Dayjs];
@@ -42,3 +42,20 @@ export const toLogQuery = (filters: LogFilterValues, page: number, pageSize: num
   ...(filters.level ? { level: filters.level } : {}),
   ...(filters.scope ? { scope: filters.scope } : {})
 });
+
+export const currentLogQuery = (
+  pageData: RequestLogPage | AppLogPage,
+  page = pageData.page
+): LogQuery => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return {
+    ...pageData.query,
+    page,
+    pageSize: pageData.pageSize || 10,
+    startAt: pageData.query?.startAt ?? pageData.startAt ?? Math.floor(start.getTime() / 1000),
+    endAt: pageData.query?.endAt ?? pageData.endAt ?? Math.floor(end.getTime() / 1000)
+  };
+};

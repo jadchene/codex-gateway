@@ -90,17 +90,17 @@ export const UpstreamsPage = () => {
   };
   const saveMutation = useMutation({
     mutationFn: (input: SaveResponsesApiUpstreamInput) => window.codexGateway.saveUpstream(input),
-    onMutate: () => { message.loading({ key: "save-upstream", content: "正在保存 API 上游...", duration: 0 }); },
+    onMutate: () => { message.loading({ key: "save-upstream", content: "正在保存模型渠道...", duration: 0 }); },
     onSuccess: async () => {
       await invalidate();
       setDrawerOpen(false);
-      message.success({ key: "save-upstream", content: "API 上游已保存，模型总目录已重建" });
+      message.success({ key: "save-upstream", content: "模型渠道已保存" });
     },
     onError: (error) => message.error({ key: "save-upstream", content: `保存失败：${readableError(error)}`, duration: 8 })
   });
   const deleteMutation = useMutation({
     mutationFn: (id: string) => window.codexGateway.deleteUpstream(id),
-    onSuccess: async () => { await invalidate(); message.success("API 上游已删除"); }
+    onSuccess: async () => { await invalidate(); message.success("模型渠道已删除"); }
   });
   const balanceMutation = useMutation({
     mutationFn: (id: string) => window.codexGateway.refreshUpstreamBalance(id),
@@ -108,10 +108,10 @@ export const UpstreamsPage = () => {
   });
   const bundledMutation = useMutation({
     mutationFn: () => window.codexGateway.refreshBuiltinModels(),
-    onMutate: () => { message.loading({ key: "refresh-bundled-models", content: "正在刷新 Codex 内置模型目录...", duration: 0 }); },
+    onMutate: () => { message.loading({ key: "refresh-bundled-models", content: "正在刷新 Codex 内置模型...", duration: 0 }); },
     onSuccess: async (result) => {
       await invalidate();
-      message.success({ key: "refresh-bundled-models", content: `已刷新 ${result.bundledCount} 个内置模型，总目录共 ${result.totalCount} 个模型` });
+      message.success({ key: "refresh-bundled-models", content: `已刷新 ${result.bundledCount} 个内置模型` });
     },
     onError: (error) => message.error({ key: "refresh-bundled-models", content: `刷新失败：${readableError(error)}`, duration: 8 })
   });
@@ -176,8 +176,8 @@ export const UpstreamsPage = () => {
     let publicHeaders: Record<string, string>;
     let secretHeaders: Record<string, string>;
     try {
-      publicHeaders = parseObject(values.publicHeadersJson, "公开请求头");
-      secretHeaders = parseObject(values.secretHeadersJson, "机密请求头");
+      publicHeaders = parseObject(values.publicHeadersJson, "普通请求头");
+      secretHeaders = parseObject(values.secretHeadersJson, "加密请求头");
     } catch (error) {
       message.error(readableError(error));
       return;
@@ -199,7 +199,7 @@ export const UpstreamsPage = () => {
   };
 
   const moreItems = (upstream: UpstreamSummary): NonNullable<MenuProps["items"]> => upstream.kind === "chatgpt_subscription_pool"
-    ? [{ key: "refresh-models", label: "刷新内置模型目录", icon: <ReloadOutlined /> }]
+    ? [{ key: "refresh-models", label: "刷新内置模型", icon: <ReloadOutlined /> }]
     : [
       { key: "health", label: "连接检查", icon: <ExperimentOutlined /> },
       { key: "invoke", label: "调用测试", icon: <ExperimentOutlined /> },
@@ -230,7 +230,7 @@ export const UpstreamsPage = () => {
       render: (_, upstream) => <Space size={4}><Tag>HTTP</Tag>{upstream.supportsWebSocket && <Tag className="v1-ws-tag">WS</Tag>}</Space>
     },
     {
-      title: "余额 / 池状态", key: "balance", width: 310,
+      title: "余额 / 额度", key: "balance", width: 310,
       render: (_, upstream) => <BalanceCell upstream={upstream} />
     },
     {
@@ -262,9 +262,9 @@ export const UpstreamsPage = () => {
     <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
       <div>
         <Typography.Title level={4}>模型渠道</Typography.Title>
-        <Typography.Text type="secondary">内置模型与第三方 Responses API 模型使用同一目录结构；模型 ID 唯一决定请求渠道。</Typography.Text>
+        <Typography.Text type="secondary">管理订阅账号池和第三方模型，并设置连接方式与模型费率。</Typography.Text>
       </div>
-      <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增 API 上游</Button>
+      <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增渠道</Button>
     </Flex>
     <Table
       rowKey="id" columns={columns} dataSource={upstreamsQuery.data ?? []} loading={upstreamsQuery.isLoading}
@@ -272,7 +272,7 @@ export const UpstreamsPage = () => {
     />
 
     <Drawer
-      title={editing ? "编辑 API 上游" : "新增 API 上游"}
+      title={editing ? "编辑模型渠道" : "新增模型渠道"}
       width={760} open={drawerOpen} onClose={() => setDrawerOpen(false)}
       extra={<Button type="primary" loading={saveMutation.isPending} onClick={() => form.submit()}>保存</Button>}
     >
@@ -289,7 +289,7 @@ export const UpstreamsPage = () => {
         <Typography.Title level={5}>连接信息</Typography.Title>
         <Flex gap={12} wrap>
           <Form.Item name="name" label="渠道名称" rules={[{ required: true }]} style={{ flex: "1 1 260px" }}><Input maxLength={80} /></Form.Item>
-          <Form.Item name="baseUrl" label="Responses API Base URL" rules={[{ required: true }, { type: "url" }]} style={{ flex: "2 1 360px" }}><Input placeholder="https://api.example.com/v1" /></Form.Item>
+          <Form.Item name="baseUrl" label="API 地址" rules={[{ required: true }, { type: "url" }]} style={{ flex: "2 1 360px" }}><Input placeholder="https://api.example.com/v1" /></Form.Item>
         </Flex>
         <Flex gap={12} wrap>
           <Form.Item name="apiKey" label={editing ? "API Key（留空保持原值）" : "API Key"} style={{ flex: "1 1 320px" }}><Input.Password /></Form.Item>
@@ -301,7 +301,7 @@ export const UpstreamsPage = () => {
         </Flex>
 
         <Typography.Title level={5}>Codex 模型 JSON</Typography.Title>
-        <Alert showIcon type="info" title="请粘贴该渠道提供的 Codex models.json。工具、推理程度、输入模态和 WS 等能力均由模型元数据声明，不在网关重复配置。" />
+        <Alert showIcon type="info" title="粘贴渠道提供的 Codex models.json，用于读取模型及其支持的能力。" />
         <Form.Item name="modelCatalogJson" rules={[{ required: true }, { validator: validateCatalog }]}>
           <Input.TextArea className="v1-code-editor" autoSize={{ minRows: 12, maxRows: 24 }} spellCheck={false} />
         </Form.Item>
@@ -320,8 +320,8 @@ export const UpstreamsPage = () => {
 
         <Typography.Title level={5}>高级请求头</Typography.Title>
         <Flex gap={12} wrap>
-          <Form.Item name="publicHeadersJson" label="公开请求头 JSON" style={{ flex: 1 }}><Input.TextArea rows={5} className="v1-code-editor" /></Form.Item>
-          <Form.Item name="secretHeadersJson" label={editing ? "机密请求头 JSON（留空保持原值）" : "机密请求头 JSON"} style={{ flex: 1 }}><Input.TextArea rows={5} className="v1-code-editor" /></Form.Item>
+          <Form.Item name="publicHeadersJson" label="普通请求头 JSON" style={{ flex: 1 }}><Input.TextArea rows={5} className="v1-code-editor" /></Form.Item>
+          <Form.Item name="secretHeadersJson" label={editing ? "加密请求头 JSON（留空保持原值）" : "加密请求头 JSON"} style={{ flex: 1 }}><Input.TextArea rows={5} className="v1-code-editor" /></Form.Item>
         </Flex>
       </Form>
     </Drawer>
@@ -345,7 +345,7 @@ export const UpstreamsPage = () => {
       okText="保存费率" confirmLoading={pricingMutation.isPending}
       onCancel={() => setPricingUpstream(null)} onOk={() => pricingForm.submit()}
     >
-      <Typography.Paragraph type="secondary">统一币种：{currency}，单价单位为每百万 Token，保留四位小数。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">币种：{currency}；单价按每百万 Token 计算。</Typography.Paragraph>
       <Form form={pricingForm} onFinish={(values) => pricingUpstream && pricingMutation.mutate({ id: pricingUpstream.id, pricing: values.pricing })}>
         <Space orientation="vertical" size={8} style={{ width: "100%" }}>
           {pricingModels.map((model) => <div className="v1-model-price-row" key={model.modelId}>

@@ -74,7 +74,7 @@ export const OverviewPage = ({
         <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
           <div>
             <Typography.Title level={4}>运行概览</Typography.Title>
-            <Typography.Text type="secondary">账号、模型渠道与今日调用状态集中展示。</Typography.Text>
+            <Typography.Text type="secondary">快速查看服务状态、账号额度和今日调用。</Typography.Text>
           </div>
         </Flex>
         <Flex gap={8} wrap className="v1-table-toolbar">
@@ -83,16 +83,16 @@ export const OverviewPage = ({
         </Flex>
         <Row gutter={[16, 16]}>
           <MetricCard icon={<TeamOutlined />} title="可用订阅账号" value={`${usableAccounts}/${accounts.length}`} />
-          <MetricCard icon={<ApiOutlined />} title="健康 API 上游" value={`${healthyApiUpstreams}/${apiUpstreams.length}`} loading={upstreamQuery.isLoading} />
+          <MetricCard icon={<ApiOutlined />} title="可用第三方渠道" value={`${healthyApiUpstreams}/${apiUpstreams.length}`} loading={upstreamQuery.isLoading} />
           <MetricCard icon={<DashboardOutlined />} title="可选模型" value={modelCount} loading={upstreamQuery.isLoading} />
           <MetricCard icon={<CloudServerOutlined />} title="今日调用" value={total.calls || 0} />
         </Row>
       </div>
 
-      <Card title="服务与传输" className="v1-overview-card">
+      <Card title="服务地址" className="v1-overview-card">
         <Row gutter={[16, 12]}>
-          <Col xs={24} lg={12}><Typography.Text type="secondary">Codex Gateway</Typography.Text><Typography.Text className="v1-block v1-mono">{gateway.url || "未监听"}</Typography.Text></Col>
-          <Col xs={24} lg={12}><Typography.Text type="secondary">MCP Gateway</Typography.Text><Typography.Text className="v1-block v1-mono">{mcpGateway.url || "未监听"}</Typography.Text></Col>
+          <Col xs={24} lg={12}><Typography.Text type="secondary">Codex Gateway</Typography.Text><Typography.Text className="v1-block v1-mono">{gateway.url || "未启动"}</Typography.Text></Col>
+          <Col xs={24} lg={12}><Typography.Text type="secondary">MCP Gateway</Typography.Text><Typography.Text className="v1-block v1-mono">{mcpGateway.url || "未启动"}</Typography.Text></Col>
         </Row>
       </Card>
 
@@ -117,11 +117,11 @@ export const OverviewPage = ({
         </Row>
       </Card>
 
-      <Card title="风险与最近事件" className="v1-overview-card">
+      <Card title="需要关注" className="v1-overview-card">
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           {unhealthyApiUpstreams.map((upstream) => <Alert key={upstream.id} showIcon type="warning" title={`${upstream.name} 健康检查失败`} description={upstream.healthMessage || "请检查地址、认证和网络。"} />)}
           {errorLogs.length === 0 && unhealthyApiUpstreams.length === 0
-            ? <Alert showIcon type="success" title="当前没有需要处理的错误事件" />
+            ? <Alert showIcon type="success" title="当前运行正常" />
             : <List size="small" dataSource={errorLogs} renderItem={(log) => <List.Item><Typography.Text type="danger">{log.scope || "system"} · {log.message || log.status || "未知错误"}</Typography.Text></List.Item>} />}
         </Space>
       </Card>

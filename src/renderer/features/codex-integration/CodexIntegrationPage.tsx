@@ -57,7 +57,7 @@ export const CodexIntegrationPage = ({
       <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
         <div>
           <Typography.Title level={4}>接入模式</Typography.Title>
-          <Typography.Text type="secondary">Codex 可以固定使用本地统一网关，也可以临时切换为某个订阅账号直连。</Typography.Text>
+          <Typography.Text type="secondary">选择 Codex 使用本地网关，或直接使用一个订阅账号。</Typography.Text>
         </div>
         {settings.codex_auth_mode && <Tag color="success" icon={<CheckCircleOutlined />}>当前：{settings.codex_auth_mode === "gateway" ? "网关模式" : "账号模式"}</Tag>}
       </Flex>
@@ -71,7 +71,7 @@ export const CodexIntegrationPage = ({
         </Radio.Button>
       </Radio.Group>
 
-      {!mode && <Alert showIcon type="info" title="当前 Codex 认证状态未知，请选择一种模式。" />}
+      {!mode && <Alert showIcon type="info" title="请选择 Codex 的接入方式。" />}
 
       {mode === "gateway" && (
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -79,7 +79,7 @@ export const CodexIntegrationPage = ({
             showIcon
             type="success"
             title="推荐模式"
-            description="应用时会同时写入本地网关 Key、provider 和组合模型目录；第三方 Responses API 模型由目录声明 shell、tool、MCP 与推理能力。模型渠道变更后目录会自动重建。"
+            description="Codex 将使用已配置的订阅账号和模型渠道，并根据所选模型发送请求。"
           />
           <div className="v1-auth-preview-grid">
             <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: maskedGatewayKey(settings) }, null, 2)} />
@@ -93,8 +93,8 @@ export const CodexIntegrationPage = ({
           <Alert
             showIcon
             type="warning"
-            title="账号直连会把选中账号的认证写入 Codex"
-            description="这会移除 Codex Gateway provider 配置；需要恢复统一路由时重新应用网关模式。"
+            title="Codex 将直接使用所选账号"
+            description="账号模式不会经过本地网关。需要使用模型渠道时，请重新应用网关模式。"
           />
           <Select
             showSearch
@@ -139,7 +139,7 @@ const normalizeAuthMode = (value: unknown): AuthMode => (
 );
 
 const maskedGatewayKey = (settings: Settings): string => settings.gateway_api_key_configured === "true"
-  ? `•••••••• (${settings.gateway_api_key_fingerprint || "configured"})`
+  ? "••••••••（已配置）"
   : "未配置";
 
 const providerToml = (settings: Settings, gatewayBase: string, modelCatalogPath: string): string => {

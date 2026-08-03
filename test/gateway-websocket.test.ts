@@ -410,7 +410,7 @@ test("Responses WebSocket closes for reconnect before changing models within one
   }
 });
 
-test("Responses WebSocket closes for reconnect when the first model only supports HTTP", async () => {
+test("Responses WebSocket immediately requests HTTP fallback when the first model only supports HTTP", async () => {
   let harness;
   let upstreamUpgrades = 0;
   harness = await startHarness({
@@ -422,9 +422,20 @@ test("Responses WebSocket closes for reconnect when the first model only support
   try {
     const { websocket, response } = await connectGateway(harness, "/v1/responses", { "session-id": "post-upgrade-426" });
     assert.equal(response.statusCode, 101);
+    const message = nextMessage(websocket);
     const closed = nextCloseDetail(websocket);
     websocket.send(JSON.stringify({ type: "response.create", model: "deepseek-chat" }));
-    assert.equal((await closed).code, 1012);
+    const event = JSON.parse((await message).toString());
+    assert.deepEqual(event, {
+      type: "error",
+      status: 426,
+      error: {
+        type: "unsupported_transport",
+        code: "WEBSOCKET_NOT_SUPPORTED",
+        message: "The selected model upstream supports HTTP transport only."
+      }
+    });
+    assert.equal((await closed).code, 1008);
     assert.equal(upstreamUpgrades, 0);
   } finally {
     await harness.close();

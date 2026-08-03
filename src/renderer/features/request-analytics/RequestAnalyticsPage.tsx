@@ -96,7 +96,7 @@ export const RequestAnalyticsPage = ({
   const allColumns: TableColumnsType<RequestLog> = [
     { key: "time", title: "时间", dataIndex: "created_at", width: 160, render: (value) => formatTime(value) },
     {
-      title: "目标",
+      title: "渠道",
       key: "target",
       width: 200,
       render: (_, log) => (
@@ -113,7 +113,7 @@ export const RequestAnalyticsPage = ({
         const route = log.upstream_model && log.upstream_model !== log.client_model
           ? `${log.client_model || "-"} → ${log.upstream_model}`
           : log.client_model || log.upstream_model || "-";
-        return <Typography.Text ellipsis={{ tooltip: route }} className="v1-mono v1-nowrap">{route}</Typography.Text>;
+        return <Typography.Text ellipsis className="v1-mono v1-nowrap">{route}</Typography.Text>;
       }
     },
     { key: "path", title: "路径", dataIndex: "request_path", width: 140, ellipsis: true, render: (value) => value || "-" },
@@ -130,9 +130,16 @@ export const RequestAnalyticsPage = ({
       key: "tokens",
       width: 260,
       render: (_, log) => (
-        <Typography.Text className="v1-nowrap" title={`缓存命中率 ${cacheHitRate(log.input_tokens, log.cached_input_tokens).toFixed(2)}%`}>
-          {formatTokenNumber(log.input_tokens)} / {formatTokenNumber(log.cached_input_tokens)} / {formatTokenNumber(log.output_tokens)}
-        </Typography.Text>
+        <TokenUsageTooltip usage={{
+          input_tokens: Number(log.input_tokens || 0),
+          cached_input_tokens: Number(log.cached_input_tokens || 0),
+          output_tokens: Number(log.output_tokens || 0),
+          total_tokens: Number(log.total_tokens || 0)
+        }}>
+          <Typography.Text className="v1-nowrap">
+            {formatTokenNumber(log.input_tokens)} / {formatTokenNumber(log.cached_input_tokens)} / {formatTokenNumber(log.output_tokens)}
+          </Typography.Text>
+        </TokenUsageTooltip>
       )
     },
     {
@@ -151,7 +158,7 @@ export const RequestAnalyticsPage = ({
         <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
           <div>
             <Typography.Title level={4}>调用分析</Typography.Title>
-            <Typography.Text type="secondary">展示实际模型渠道、Token、耗时和统一币种成本。</Typography.Text>
+            <Typography.Text type="secondary">按渠道、模型和账号查看调用量、Token、耗时与费用。</Typography.Text>
           </div>
           <Dropdown
             trigger={["click"]}
@@ -190,11 +197,11 @@ export const RequestAnalyticsPage = ({
             />
           </div>
           <div>
-            <Typography.Text type="secondary" className="v1-filter-label">上游</Typography.Text>
+            <Typography.Text type="secondary" className="v1-filter-label">渠道</Typography.Text>
             <Select
               allowClear
               value={filters.upstreamId || undefined}
-              placeholder="全部上游"
+              placeholder="全部渠道"
               style={{ width: 190 }}
               options={(upstreamQuery.data || []).map((upstream) => ({ value: upstream.id, label: upstream.name }))}
               onChange={(value) => setFilters((current) => ({ ...current, upstreamId: value || "" }))}
@@ -205,7 +212,7 @@ export const RequestAnalyticsPage = ({
             <Input value={filters.clientModel} placeholder="模糊匹配" style={{ width: 170 }} onChange={(event) => setFilters((current) => ({ ...current, clientModel: event.target.value }))} />
           </div>
           <div>
-            <Typography.Text type="secondary" className="v1-filter-label">上游模型</Typography.Text>
+            <Typography.Text type="secondary" className="v1-filter-label">渠道模型</Typography.Text>
             <Input value={filters.upstreamModel} placeholder="模糊匹配" style={{ width: 170 }} onChange={(event) => setFilters((current) => ({ ...current, upstreamModel: event.target.value }))} />
           </div>
           <div>
@@ -236,18 +243,29 @@ export const RequestAnalyticsPage = ({
 
         {summary.byAccount.length > 0 && (
           <div className="v1-breakdown-grid">
-            {summary.byAccount.map((item) => (
-              <TokenUsageTooltip usage={item} key={item.account_id || "none"}>
+            {summary.byAccount.map((item) => {
+              const isAccount = Boolean(item.account_id);
+              const key = isAccount ? `account:${item.account_id}` : `upstream:${item.upstream_id || "unknown"}`;
+              const active = isAccount
+                ? filters.accountId === item.account_id
+                : filters.upstreamId === item.upstream_id;
+              const title = isAccount
+                ? item.account_name || item.account_id
+                : item.upstream_name || item.upstream_id || "未识别渠道";
+              const nextFilters = isAccount
+                ? { ...filters, accountId: active ? "" : item.account_id || "", upstreamId: "" }
+                : { ...filters, accountId: "", upstreamId: active ? "" : item.upstream_id || "" };
+              return <TokenUsageTooltip usage={item} key={key}>
                 <Card
-                  hoverable={Boolean(item.account_id)}
+                  hoverable={Boolean(item.account_id || item.upstream_id)}
                   size="small"
-                  className={filters.accountId === item.account_id ? "v1-summary-card active" : "v1-summary-card"}
-                  onClick={() => item.account_id && runQuery(1, pageData.pageSize, { ...filters, accountId: filters.accountId === item.account_id ? "" : item.account_id })}
+                  className={active ? "v1-summary-card active" : "v1-summary-card"}
+                  onClick={() => (item.account_id || item.upstream_id) && runQuery(1, pageData.pageSize, nextFilters)}
                 >
-                  <Statistic title={item.account_id ? item.account_name || item.account_id : "非账号渠道"} value={item.total_tokens || 0} formatter={(value) => formatTokenNumber(Number(value || 0))} suffix="Token" />
+                  <Statistic title={title} value={item.total_tokens || 0} formatter={(value) => formatTokenNumber(Number(value || 0))} suffix="Token" />
                 </Card>
-              </TokenUsageTooltip>
-            ))}
+              </TokenUsageTooltip>;
+            })}
           </div>
         )}
 
@@ -302,20 +320,26 @@ const TokenUsageTooltip = ({
   </Tooltip>
 );
 
-const requestLogDetails = (log: RequestLog) => Object.entries({
-  时间: formatTime(log.created_at),
-  目标: log.upstream_name || log.upstream_id || log.account_name || "-",
-  目标类型: log.upstream_kind || "-",
-  客户端模型: log.client_model || "-",
-  上游模型: log.upstream_model || "-",
-  会话: log.session_id || "-",
-  客户端路径: log.request_path || "-",
-  上游路径: log.upstream_path || "-",
-  状态: log.status || "-",
-  耗时: log.duration_ms ? `${log.duration_ms} ms` : "-",
-  输入Token: log.input_tokens || 0,
-  缓存输入: log.cached_input_tokens || 0,
-  输出Token: log.output_tokens || 0,
-  总Token: log.total_tokens || 0,
-  消息: log.message || "-"
-}).map(([key, value]) => ({ key, label: key, children: String(value) }));
+const requestLogDetails = (log: RequestLog) => {
+  const account = [log.account_name, log.account_email]
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .join(" · ") || log.account_id || "-";
+  return Object.entries({
+    时间: formatTime(log.created_at),
+    渠道: log.upstream_name || log.upstream_id || log.account_name || "-",
+    渠道类型: log.upstream_kind || "-",
+    ...(log.account_id ? { 订阅账号: account } : {}),
+    客户端模型: log.client_model || "-",
+    渠道模型: log.upstream_model || "-",
+    会话: log.session_id || "-",
+    客户端路径: log.request_path || "-",
+    渠道路径: log.upstream_path || "-",
+    状态: log.status || "-",
+    耗时: log.duration_ms ? `${log.duration_ms} ms` : "-",
+    输入Token: log.input_tokens || 0,
+    缓存输入: log.cached_input_tokens || 0,
+    输出Token: log.output_tokens || 0,
+    总Token: log.total_tokens || 0,
+    消息: log.message || "-"
+  }).map(([key, value]) => ({ key, label: key, children: String(value) }));
+};

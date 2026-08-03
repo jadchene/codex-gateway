@@ -80,6 +80,16 @@ test("app log queries filter level, scope, status, and keyword without renderer-
     });
     assert.equal(result.total, 1);
     assert.equal(result.items[0].message, "gateway failure request-42");
+    assert.deepEqual(result.query, {
+      page: 1,
+      pageSize: 20,
+      startAt: 0,
+      endAt: result.query.endAt,
+      status: "fail",
+      keyword: "request-42",
+      level: "error",
+      scope: "gateway"
+    });
   } finally {
     store.db.close();
     fs.rmSync(directory, { recursive: true, force: true });
@@ -125,6 +135,21 @@ test("request log filters expose the actual channel and model", () => {
     assert.equal(result.items[0].upstream_name, "API A");
     assert.equal(result.items[0].client_model, "gpt-client");
     assert.equal(result.items[0].upstream_model, "provider-model");
+    assert.equal(result.query.upstreamId, "api-a");
+    assert.equal(result.query.clientModel, "gpt");
+    assert.equal(result.query.upstreamModel, "provider");
+    assert.equal(result.query.sessionId, "session-1");
+    assert.equal(result.query.status, "200");
+
+    const channelSummary = store.tokenSummary({ page: 1, pageSize: 20, startAt: 0, endAt });
+    assert.deepEqual(channelSummary.byAccount.map((item) => ({
+      upstreamId: item.upstream_id,
+      upstreamName: item.upstream_name,
+      calls: item.calls
+    })), [
+      { upstreamId: "api-a", upstreamName: "API A", calls: 1 },
+      { upstreamId: "api-b", upstreamName: "api-b", calls: 1 }
+    ]);
   } finally {
     store.db.close();
     fs.rmSync(directory, { recursive: true, force: true });

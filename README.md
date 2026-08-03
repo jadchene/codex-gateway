@@ -2,166 +2,83 @@
 
 [中文文档](README_zh.md)
 
-Codex Gateway is a local desktop gateway for personal Codex development. It manages ChatGPT subscription accounts, Responses API model channels, Codex CLI integration, a local MCP Gateway process, analytics, and runtime logs.
-
-The app uses Electron 43, React 19, TypeScript, Ant Design 6, Vite, and local SQLite. Account tokens, API keys, and OAuth PKCE verifiers remain in the main process and are encrypted through Electron `safeStorage`; the renderer only receives redacted status and fingerprints.
+Codex Gateway is a Windows desktop app for managing Codex accounts and model channels in one place.
 
 ![Codex Gateway overview](docs/screenshots/overview.png)
 
-## Features
+## What You Can Do
 
-- Add ChatGPT subscription accounts through browser OAuth or local Codex auth import.
-- Track five-hour and seven-day quota windows and reset credits.
-- Configure multiple Responses API-compatible model channels with unique model ownership.
-- Merge bundled Codex model metadata with third-party model metadata so models can be selected directly in Codex.
-- Configure independent input, cached-input, and output rates for every model with one global currency.
-- Proxy HTTP/SSE and native Responses WebSocket without a WS-to-HTTP adapter.
-- Manage Codex Gateway and `mcp-gateway-service`, including settings-controlled startup auto-launch.
-- Inspect channel, model, token, latency, status, and estimated-cost data in responsive tables with fixed action columns.
-- Use Ant Design components, local fonts, light/dark themes, and collapsible navigation.
-- Keep production and development profiles under single-instance coordination.
+- Add ChatGPT subscription accounts and view their five-hour and seven-day quotas.
+- Add Responses API model channels such as DeepSeek-compatible services.
+- Use bundled Codex models and third-party models from the Codex model picker.
+- Set input, cached-input, and output prices for each model.
+- Start and stop Codex Gateway and MCP Gateway.
+- Review requests, token usage, latency, estimated cost, and runtime errors.
+- Switch between light and dark themes.
 
-## Workflow
+## Get Started
 
-1. Sign in or import a subscription account.
-2. Add a model channel with its base URL, API key, and Codex model JSON.
-3. Configure three rates per model and declare native WebSocket support.
-4. Apply Gateway mode under Codex Integration.
-5. Select a bundled or third-party model directly in Codex. The exact model ID determines its only channel.
+1. Open `Codex Gateway.exe`.
+2. Add a subscription account from **Subscription Accounts**.
+3. Add any third-party service from **Model Channels**.
+4. Open **Access Mode** and apply Gateway mode.
+5. Start Codex Gateway from **Services**.
+6. Select the model you want in Codex.
 
-There are no model aliases, cross-channel priorities, or cross-channel fallbacks. A third-party model ID cannot collide with a bundled model or another configured channel.
+Gateway mode lets Codex use both subscription accounts and configured model channels. Account mode connects Codex directly to one selected subscription account.
 
-## Model Catalog
+## Subscription Accounts
 
-Gateway mode uses two generated files under the actual data directory:
+You can sign in through the browser or import the account currently used by Codex. The account list shows availability, quota windows, refresh time, and reset credits.
 
-```text
-data/codex-bundled-models.json
-data/models.json
-```
+Accounts can be enabled, disabled, refreshed, or removed. Automatic quota refresh is configured under **Settings > Accounts and Quotas**.
 
-The first caches `codex debug models --bundled`. The second combines bundled models with enabled third-party models and is referenced by Codex through `model_catalog_json`; the absolute path is generated from the runtime data directory rather than a hard-coded user path.
+## Model Channels
 
-- App startup refreshes bundled metadata once and may use the existing cache if Codex debug fails.
-- Channel changes rebuild the combined catalog from the cache.
-- Gateway restart validates and rebuilds the catalog without rerunning Codex debug.
-- The built-in account pool provides a manual bundled-model refresh action.
-- A first run without a usable cache reports a clear error when bundled discovery fails.
+Each third-party channel requires:
 
-Third-party channels must provide complete Codex model metadata, not only model names:
+- A name, API address, and API key.
+- The channel's Codex `models.json` content.
+- Whether the channel supports Responses WebSocket.
+- Optional custom headers, balance lookup, and per-model prices.
 
-```json
-{
-  "models": [
-    {
-      "slug": "provider-model-id",
-      "display_name": "Provider Model",
-      "supported_reasoning_levels": [
-        { "effort": "high", "description": "High reasoning" }
-      ]
-    }
-  ]
-}
-```
+Model IDs must be unique across all channels. Codex uses the selected model ID to choose its channel.
 
-Shell, freeform `apply_patch`, parallel tool calls, MCP, and reasoning levels are described by each model object. The app preserves those fields, overwrites `prefer_websockets` from the channel setting, and mirrors the value to the compatibility field `supports_websockets` so Codex can choose HTTP when that model has no native WS support.
+The model JSON also tells Codex which tools, MCP features, input types, and reasoning levels the model supports. Use the metadata supplied by the model provider.
 
-## Channels and Billing
-
-Each Responses API channel has a name, base URL, Bearer API key, enabled state, native WebSocket flag, public and encrypted secret headers, complete Codex model JSON, per-model rates, and an optional balance method.
-
-Connectivity Check reads the standard `/models` endpoint without creating a Responses request. Invocation Test sends a minimal request and has a separate billing confirmation. Secrets are not read back into the renderer or written to logs and Codex configuration.
-
-The built-in balance method follows DeepSeek's official `GET /user/balance` response. Other channels may disable balance lookup. The subscription pool displays usable/total account counts and aggregate reset credits.
-
-Only currency is global. There are no global or channel-level cost factors; estimates use the three rates stored on the actual request model.
-
-## Request Selection and WebSocket
-
-HTTP/SSE reads `model` from the request body. An enabled third-party owner is called directly; all other model IDs use the built-in ChatGPT subscription pool. Account availability, quota, priority, and session/turn affinity remain internal to that pool.
-
-Third-party channels do not receive client OpenAI, ChatGPT, Codex, session, or subscription-account headers, and equivalent upstream response headers are not forwarded. The gateway only synthesizes fully available five-hour and seven-day quota windows so Codex does not mistake an API channel for an exhausted subscription pool. The subscription-pool quota-header setting controls only blocking or aggregate rewriting for the built-in pool.
-
-`WS /v1/responses` accepts the local connection, waits for the first `response.create`, opens the exact upstream selected by its model ID, and binds that connection to the initial model and channel. A channel without WS support writes `prefer_websockets: false` into the combined model catalog so Codex should use HTTP directly. If the client still opens WS, or changes model/channel on an established connection, the gateway closes the local connection with code 1012 before forwarding so Codex can reconnect using the current catalog. The gateway does not translate WS to HTTP or forward the request to the old channel.
-
-## Codex CLI Integration
-
-Gateway mode writes the local key, `codex_gateway` provider, and combined catalog path. Account mode writes the selected subscription credential and removes app-managed gateway/catalog settings.
-
-```toml
-model_provider = "codex_gateway"
-model_catalog_json = "<data-dir>/models.json"
-
-[model_providers.codex_gateway]
-name = "OpenAI"
-base_url = "http://localhost:8436/v1"
-wire_api = "responses"
-supports_websockets = true
-```
-
-`auth.json` and `config.toml` are written transactionally and rolled back together if verification fails.
-
-## Local Gateway API
-
-- `GET /v1/models`
-- `POST /v1/responses`
-- `POST /v1/responses/compact`
-- `POST /v1/memories/trace_summarize`
-- `POST /v1/images/generations`
-- `POST /v1/images/edits`
-- `POST /v1/realtime/calls`
-- `WS /v1/responses`
-- `WS /v1/realtime`
-
-The production default is `http://localhost:8436/v1`, protected by a generated local API key.
+If a channel does not support WebSocket, leave **Supports WS** disabled. Codex requests for that channel will use HTTP.
 
 ## MCP Gateway
 
-The app manages external [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway) in Streamable HTTP mode:
+Codex Gateway can manage a local [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure its file path and address under **Settings > MCP Integration**, then start it from **Services**.
 
-```text
-mcp-gateway-service --http --config ./config.json --host 127.0.0.1 --port 3000 --path /mcp
-```
+## Data
 
-The process is launched without a command shell. Windows npm shims are resolved to their Node.js entry points, and stop operations terminate the process tree.
+Application data is stored beside the packaged app in `data/`. The **Settings > Storage and Maintenance** page shows the exact location and provides controls for clearing request and runtime logs.
 
-## Data and Upgrades
+Back up the `data/` directory before moving the app or making major changes. Do not share it because it contains account and channel configuration.
 
-```text
-data/codex-gateway.sqlite
-data/codex-bundled-models.json
-data/models.json
-data/browser
-data/backups
-```
-
-SQLite schema v3 stores accounts, quotas, channels, per-model rates, request history, runtime logs, and settings. Upgrades checkpoint WAL, create a consistent `VACUUM INTO` backup, and run integrity checks before migration.
-
-Never commit `data/`, Codex configuration, tokens, or API keys.
-
-## Development and Packaging
+## Development
 
 Node.js 24 is required.
 
 ```bash
 npm install
+npm run dev
 npm run verify
+```
+
+Create the Windows unpacked build with:
+
+```bash
 npm run pack:unpacked
 ```
 
-The isolated development profile uses `.runtime/v1-dev` and separate ports while retaining single-instance coordination and settings-controlled Gateway/MCP auto-start. It does not read production data or live Codex credentials.
+The output is `release/win-unpacked/Codex Gateway.exe`. The app is not code-signed and no installer is included.
 
-The unpacked output is:
+## Usage Notice
 
-```text
-release/win-unpacked/Codex Gateway.exe
-```
-
-The build is not code-signed and does not include an installer.
-
-## Safety and Terms
-
-This project is for learning and personal local development. Users must follow applicable platform terms. It does not provide accounts, API keys, accounts-as-a-service, or proxy services and must not be used for multi-user sharing, resale, or restriction bypasses.
+This project is intended for personal local development. Use your own accounts and API keys, and follow the terms of each service provider. Do not use it for account sharing, resale, or bypassing service restrictions.
 
 ## License
 

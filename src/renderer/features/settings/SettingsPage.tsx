@@ -104,7 +104,7 @@ export const SettingsPage = ({
   const copyGatewayKey = async (): Promise<void> => {
     const value = String(form.getFieldValue("gateway_api_key") || "");
     if (!value) {
-      onMessage("现有密钥不会回传到界面；请先生成新密钥再复制。");
+      onMessage("如需复制，请先生成一个新密钥。");
       return;
     }
     try {
@@ -132,7 +132,7 @@ export const SettingsPage = ({
   };
 
   const generalTab = (
-    <SettingsSection title="常规" description="控制应用启动和关闭行为；服务运行参数在其他领域单独配置。">
+    <SettingsSection title="常规" description="设置应用的启动和关闭方式。">
       <div className="v1-settings-grid v1-settings-grid-2">
         <Form.Item name="startup_launch" label="开机自启">
           <Select options={[
@@ -159,7 +159,7 @@ export const SettingsPage = ({
   );
 
   const appearanceTab = (
-    <SettingsSection title="外观" description="主题和密度会立即预览，保存后写入本地数据库。">
+    <SettingsSection title="外观" description="选择界面主题和显示密度。">
       <div className="v1-settings-grid v1-settings-grid-2">
         <Form.Item name="appearance_theme" label="主题">
           <Segmented block options={[
@@ -180,7 +180,7 @@ export const SettingsPage = ({
 
   const gatewayTab = (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <SettingsSection title="本地监听" description="Codex 只连接本地网关；API 上游凭据在“模型渠道”页面单独管理。">
+      <SettingsSection title="本地监听" description="设置 Codex Gateway 的监听地址和访问密钥。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <Form.Item name="gateway_host" label="监听地址" rules={[{ required: true }]}>
             <Input placeholder="127.0.0.1" />
@@ -201,8 +201,8 @@ export const SettingsPage = ({
         <Form.Item
           label="更换本地 API Key"
           extra={settings.gateway_api_key_configured === "true"
-            ? `已安全配置，fingerprint ${settings.gateway_api_key_fingerprint || "未知"}；留空表示保留现有密钥。`
-            : "尚未配置，请生成或输入新密钥。保存后不再显示明文。"}
+            ? "已设置。留空会保留当前密钥。"
+            : "尚未设置，请生成或输入一个新密钥。"}
         >
           <Space.Compact block>
             <Form.Item name="gateway_api_key" noStyle>
@@ -219,7 +219,7 @@ export const SettingsPage = ({
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
           <div>
             <Typography.Text strong>自动启动 Codex Gateway</Typography.Text>
-            <Typography.Text type="secondary" className="v1-block">隔离开发模式始终忽略此项。</Typography.Text>
+            <Typography.Text type="secondary" className="v1-block">打开应用时自动启动服务。</Typography.Text>
           </div>
           <Form.Item name="auto_start_gateway_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
         </Flex>
@@ -235,10 +235,10 @@ export const SettingsPage = ({
           <NumberField name="usage_refresh_timeout_seconds" label="单次刷新超时" suffix="秒" min={1} max={300} />
           <NumberField name="gateway_quota_cooldown_seconds" label="额度冷却" suffix="秒" min={1} max={3600} />
         </div>
-        <Form.Item name="codex_quota_headers_mode" label="订阅账号池额度响应头" extra="只控制订阅账号池；API 渠道固定返回 100% 可用额度。">
+        <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="仅影响订阅账号；第三方渠道始终显示可用。">
           <Segmented options={[
-            { label: "屏蔽上游额度", value: "block" },
-            { label: "重写为账号池汇总", value: "rewrite" }
+            { label: "隐藏账号额度", value: "block" },
+            { label: "显示账号池汇总", value: "rewrite" }
           ]} />
         </Form.Item>
       </SettingsSection>
@@ -247,13 +247,13 @@ export const SettingsPage = ({
 
   const logsBillingTab = (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <SettingsSection title="日志保留" description="每日维护按保留天数删除过期记录。">
+      <SettingsSection title="日志保留" description="设置调用记录和运行日志的保留时间。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <NumberField name="request_log_retention_days" label="调用记录保留" suffix="天" min={1} max={3650} />
           <NumberField name="app_log_retention_days" label="运行日志保留" suffix="天" min={1} max={3650} />
         </div>
       </SettingsSection>
-      <SettingsSection title="计费币种" description="所有渠道、模型费率和调用成本统一使用同一个币种。">
+      <SettingsSection title="计费币种" description="设置模型费率和费用统计使用的币种。">
         <Form.Item name="billing_currency" label="全局币种" style={{ maxWidth: 260 }}>
           <Select options={["USD", "CNY", "EUR", "JPY"].map((value) => ({ value, label: value }))} />
         </Form.Item>
@@ -262,7 +262,7 @@ export const SettingsPage = ({
   );
 
   const mcpTab = (
-    <SettingsSection title="MCP Gateway" description="配置 MCP Gateway 进程、监听地址以及是否随应用自动启动。">
+    <SettingsSection title="MCP Gateway" description="设置 MCP Gateway 的地址和启动方式。">
       <Flex align="center" justify="space-between" className="v1-setting-switch-row">
         <Typography.Text strong>自动启动 MCP Gateway</Typography.Text>
         <Form.Item name="auto_start_mcp_gateway_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
@@ -281,12 +281,12 @@ export const SettingsPage = ({
       <SettingsSection title="数据位置">
         <Descriptions bordered column={1} size="small" items={[
           { key: "data", label: "数据目录", children: <Typography.Text copyable className="v1-mono">{paths.dataDir || "-"}</Typography.Text> },
-          { key: "sqlite", label: "SQLite", children: <Typography.Text copyable className="v1-mono">{paths.dbPath || "-"}</Typography.Text> }
+          { key: "sqlite", label: "数据库文件", children: <Typography.Text copyable className="v1-mono">{paths.dbPath || "-"}</Typography.Text> }
         ]} />
       </SettingsSection>
       <Card className="v1-danger-card" title="数据清理" size="small">
         <Flex align="center" justify="space-between" gap={16} wrap>
-          <Typography.Text type="secondary">只清理本地记录，不删除账号、上游或应用配置。</Typography.Text>
+          <Typography.Text type="secondary">只清理本地记录，不删除账号、模型渠道或应用设置。</Typography.Text>
           <Space>
             <Popconfirm title="清空全部调用记录？" description="此操作不可恢复。" okButtonProps={{ danger: true }} onConfirm={onClearTokenLogs}>
               <Button danger>清空调用记录</Button>
@@ -346,15 +346,15 @@ export const SettingsPage = ({
         <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
           <div>
             <Typography.Title level={4}>设置中心</Typography.Title>
-            <Typography.Text type="secondary">每次只展示一个配置领域，运行控制仍在服务管理页面完成。</Typography.Text>
+            <Typography.Text type="secondary">调整应用、网关、额度、日志和外观设置。</Typography.Text>
           </div>
         </Flex>
         {dirty && (gatewayRunning || mcpGatewayRunning) && [...changedFields].some((key) => !key.startsWith("appearance_") && key !== "navigation_collapsed") && (
           <Alert
             showIcon
             type="warning"
-            title="配置保存后待重启应用"
-            description={`${gatewayRunning ? "Codex Gateway" : ""}${gatewayRunning && mcpGatewayRunning ? "、" : ""}${mcpGatewayRunning ? "MCP Gateway" : ""} 正在运行；保存持久参数后请到“服务管理”重启对应服务。`}
+            title="重启服务后生效"
+            description={`${gatewayRunning ? "Codex Gateway" : ""}${gatewayRunning && mcpGatewayRunning ? "、" : ""}${mcpGatewayRunning ? "MCP Gateway" : ""} 正在运行。保存后请到“服务管理”重启对应服务。`}
             style={{ marginBottom: 16 }}
           />
         )}

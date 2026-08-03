@@ -14,6 +14,7 @@ import { RequestAnalyticsPage } from "./request-analytics/RequestAnalyticsPage";
 import { RuntimeLogsPage } from "./runtime-logs/RuntimeLogsPage";
 import { ServicesPage } from "./services/ServicesPage";
 import { UpstreamsPage } from "./upstreams/UpstreamsPage";
+import { currentLogQuery } from "../lib/log-query";
 
 const emptyRequestPage = { items: [], total: 0, page: 1, pageSize: 10 };
 const emptyLogPage = { items: [], total: 0, page: 1, pageSize: 10 };
@@ -68,9 +69,9 @@ describe("Ant Design pages", () => {
     const user = userEvent.setup();
     renderWithQueries(<UpstreamsPage />);
     expect(screen.getByRole("heading", { name: "模型渠道" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: /新增 API 上游/ }));
+    await user.click(screen.getByRole("button", { name: /新增渠道/ }));
     expect(screen.getByText("Codex 模型 JSON")).toBeTruthy();
-    expect(screen.getByText(/工具、推理程度、输入模态和 WS/)).toBeTruthy();
+    expect(screen.getByText(/用于读取模型及其支持的能力/)).toBeTruthy();
     expect((document.querySelector("textarea.v1-code-editor") as HTMLTextAreaElement | null)?.value).toBe("");
     expect(screen.queryByText("模型映射")).toBeNull();
   });
@@ -106,6 +107,12 @@ describe("Ant Design pages", () => {
         id: 1,
         created_at: 1,
         session_id: "session-only-in-detail",
+        account_id: "account-a",
+        account_name: "账号 A",
+        account_email: "a@example.com",
+        upstream_name: "订阅账号池",
+        client_model: "gpt-client",
+        upstream_model: "gpt-upstream",
         input_tokens: 1234,
         cached_input_tokens: 234,
         output_tokens: 56,
@@ -114,16 +121,26 @@ describe("Ant Design pages", () => {
     };
     const summary = {
       total: { total_tokens: 1524, input_tokens: 1000, cached_input_tokens: 400, output_tokens: 524 },
-      byAccount: [{ account_id: null, account_name: "未关联账号", total_tokens: 555, input_tokens: 400, cached_input_tokens: 100, output_tokens: 155 }]
+      byAccount: [
+        { account_id: null, upstream_id: "deepseek", upstream_name: "DeepSeek API", total_tokens: 555, input_tokens: 400, cached_input_tokens: 100, output_tokens: 155 },
+        { account_id: null, upstream_id: "qwen", upstream_name: "Qwen API", total_tokens: 333, input_tokens: 200, cached_input_tokens: 50, output_tokens: 133 }
+      ]
     };
     renderWithQueries(<RequestAnalyticsPage pageData={pageData} summary={summary} accounts={[]} settings={{ billing_currency: "CNY" }} onMessage={vi.fn()} onQuery={onQuery} />);
     expect(screen.getAllByText("估算成本（CNY）").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("Token（输入 / 缓存输入 / 输出）").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("1,234 / 234 / 56")).toBeTruthy();
+    const rowToken = screen.getByText("1,234 / 234 / 56");
+    expect(rowToken.getAttribute("title")).toBeNull();
+    await user.hover(rowToken);
+    expect(await screen.findByText("缓存命中率：19.0%")).toBeTruthy();
+    expect(screen.getByText("gpt-client → gpt-upstream").getAttribute("title")).toBeNull();
     expect(screen.queryByText("session-only-in-detail")).toBeNull();
-    expect(screen.getByText("非账号渠道")).toBeTruthy();
+    expect(screen.getByText("DeepSeek API")).toBeTruthy();
+    expect(screen.getByText("Qwen API")).toBeTruthy();
     await user.hover(screen.getByText("1,524"));
     expect(await screen.findByText("缓存命中率：40.0%")).toBeTruthy();
+    await user.click(screen.getByText("订阅账号池"));
+    expect(await screen.findByText("账号 A · a@example.com")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /查询/ }));
     expect(onQuery).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("button", { name: /重置/ }));
@@ -141,6 +158,39 @@ describe("Ant Design pages", () => {
     await user.click(screen.getByRole("button", { name: /重置/ }));
     expect(onQuery).toHaveBeenCalledOnce();
     expect(onQuery.mock.calls[0]?.[0]).not.toHaveProperty("keyword");
+  });
+
+  it("keeps all active filters when an event-driven refresh rebuilds a log query", () => {
+    const query = currentLogQuery({
+      items: [],
+      total: 0,
+      page: 3,
+      pageSize: 50,
+      startAt: 100,
+      endAt: 200,
+      query: {
+        page: 3,
+        pageSize: 50,
+        startAt: 100,
+        endAt: 200,
+        upstreamId: "deepseek",
+        clientModel: "deepseek",
+        status: "200",
+        level: "error",
+        keyword: "timeout"
+      }
+    });
+    expect(query).toEqual({
+      page: 3,
+      pageSize: 50,
+      startAt: 100,
+      endAt: 200,
+      upstreamId: "deepseek",
+      clientModel: "deepseek",
+      status: "200",
+      level: "error",
+      keyword: "timeout"
+    });
   });
 
   it("applies Codex gateway mode", async () => {

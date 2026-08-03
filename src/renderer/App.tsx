@@ -6,6 +6,7 @@ import type { PublicAccount } from "../shared/contracts/accounts";
 import type { BootstrapData } from "../shared/contracts/bootstrap";
 import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shared/contracts/logs";
 import type { RuntimePaths, ServiceStatus, Settings } from "../shared/contracts/settings";
+import { currentLogQuery } from "./lib/log-query";
 
 const UpstreamsPage = React.lazy(() => import("./features/upstreams/UpstreamsPage").then((module) => ({ default: module.UpstreamsPage })));
 const SettingsPage = React.lazy(() => import("./features/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })));
@@ -50,6 +51,8 @@ function App() {
   const [retryIds, setRetryIds] = useState(() => new Set<string>());
   const tokenLogsRef = useRef(tokenLogs);
   const appLogsRef = useRef(appLogs);
+  const tokenLogQueryRef = useRef<LogQuery | null>(null);
+  const appLogQueryRef = useRef<LogQuery | null>(null);
   const appLogsPausedRef = useRef(false);
   const [appLogsPaused, setAppLogsPaused] = useState(false);
   const [pendingAppLogBatches, setPendingAppLogBatches] = useState(0);
@@ -60,10 +63,12 @@ function App() {
     setSettings(data.settings);
     setAccounts(data.accounts);
     setTokenLogs(data.tokenLogs);
+    tokenLogQueryRef.current = currentLogQuery(data.tokenLogs);
     setTokenSummary(data.tokenSummary || { total: {}, byAccount: [] });
     setDashboardSummary(data.tokenSummary || { total: {}, byAccount: [] });
     setQuotaSummary(data.quotaSummary || { primary: {}, secondary: {} });
     setAppLogs(data.appLogs);
+    appLogQueryRef.current = currentLogQuery(data.appLogs);
     setGateway(data.gateway);
     setMcpGateway(data.mcpGateway || { running: false, url: "", command: "" });
     setPaths(data.paths);
@@ -114,7 +119,7 @@ function App() {
           }
           if (next.has("tokenLogs") || next.has("tokenSummary")) {
             const current = tokenLogsRef.current || {};
-            const query = currentLogQuery(current);
+            const query = tokenLogQueryRef.current || currentLogQuery(current);
             setTokenLogs(await api.listTokenLogs(query));
             setTokenSummary(await api.tokenSummary(query));
             setDashboardSummary(await api.tokenSummary());
@@ -124,7 +129,7 @@ function App() {
               setPendingAppLogBatches((count) => count + 1);
             } else {
               const current = appLogsRef.current || {};
-              setAppLogs(await api.listAppLogs(currentLogQuery(current)));
+              setAppLogs(await api.listAppLogs(appLogQueryRef.current || currentLogQuery(current)));
             }
           }
         } catch (error) {
@@ -314,7 +319,7 @@ function App() {
     try {
       const result = await api.clearTokenLogs();
       const current = tokenLogsRef.current || {};
-      const query = currentLogQuery(current, 1);
+      const query = { ...(tokenLogQueryRef.current || currentLogQuery(current)), page: 1 };
       setTokenLogs(await api.listTokenLogs(query));
       setTokenSummary(await api.tokenSummary(query));
       setDashboardSummary(await api.tokenSummary());
@@ -328,7 +333,7 @@ function App() {
     try {
       const result = await api.clearAppLogs();
       const current = appLogsRef.current || {};
-      setAppLogs(await api.listAppLogs(currentLogQuery(current, 1)));
+      setAppLogs(await api.listAppLogs({ ...(appLogQueryRef.current || currentLogQuery(current)), page: 1 }));
       setMessage(`已清空运行日志：${result.deleted || 0} 条`);
     } catch (error) {
       setMessage(`清空运行日志失败：${errorMessage(error)}`);
@@ -403,12 +408,12 @@ function App() {
             onApplyGateway={async () => {
               const result = await api.applyGatewayAuth();
               await reload();
-              setMessage(result.providerChanged ? "已写入网关认证，并补充 Codex provider" : "已写入网关认证");
+              setMessage(result.providerChanged ? "已应用网关模式" : "已更新网关模式");
             }}
             onApplyAccount={async (accountId) => {
               const result = await api.applyAccountAuth(accountId);
               await reload();
-              setMessage(result.providerRemoved ? "已写入账号模式认证，并移除网关 provider" : "已写入账号模式认证");
+              setMessage(result.providerRemoved ? "已应用账号模式" : "已更新账号模式");
             }}
           />
         )}
@@ -447,7 +452,9 @@ function App() {
             onMessage={setMessage}
             onQuery={async (query) => {
               try {
-                setTokenLogs(await api.listTokenLogs(query));
+                const result = await api.listTokenLogs(query);
+                tokenLogQueryRef.current = query;
+                setTokenLogs(result);
                 setTokenSummary(await api.tokenSummary(query));
               } catch (error) {
                 setMessage(`查询调用记录失败：${errorMessage(error)}`);
@@ -465,7 +472,7 @@ function App() {
               setAppLogsPaused(paused);
               if (!paused) {
                 setPendingAppLogBatches(0);
-                void api.listAppLogs(currentLogQuery(appLogsRef.current || {}))
+                void api.listAppLogs(appLogQueryRef.current || currentLogQuery(appLogsRef.current || {}))
                   .then(setAppLogs)
                   .catch((error) => setMessage(`恢复日志刷新失败：${errorMessage(error)}`));
               }
@@ -473,7 +480,9 @@ function App() {
             onMessage={setMessage}
             onQuery={async (query) => {
               try {
-                setAppLogs(await api.listAppLogs(query));
+                const result = await api.listAppLogs(query);
+                appLogQueryRef.current = query;
+                setAppLogs(result);
               } catch (error) {
                 setMessage(`查询运行日志失败：${errorMessage(error)}`);
               }
@@ -529,19 +538,6 @@ function cleanMcpGatewayPath(value: unknown): string {
 function quoteCommandArg(value: unknown): string {
   const text = String(value);
   return /[\s"]/g.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
-}
-
-function currentLogQuery(pageData: RequestLogPage | AppLogPage, page = pageData.page): LogQuery {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return {
-    page,
-    pageSize: pageData.pageSize || 10,
-    startAt: pageData.startAt ?? Math.floor(start.getTime() / 1000),
-    endAt: pageData.endAt ?? Math.floor(end.getTime() / 1000)
-  };
 }
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);

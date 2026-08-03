@@ -56,7 +56,7 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
       <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
         <div>
           <Typography.Title level={4}>运行日志</Typography.Title>
-          <Typography.Text type="secondary">查看服务、认证、刷新和路由事件；可暂停事件驱动的自动刷新。</Typography.Text>
+          <Typography.Text type="secondary">查看网关运行记录和错误信息。</Typography.Text>
         </div>
         <Space>
           {paused && newLogCount > 0 && <Tag color="processing">收到 {newLogCount} 批新日志</Tag>}

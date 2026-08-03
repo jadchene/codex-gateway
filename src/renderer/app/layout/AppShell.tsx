@@ -109,7 +109,6 @@ export const AppShell = ({
               />
               <div>
                 <Typography.Title level={3}>{title}</Typography.Title>
-                <Typography.Text type="secondary">本地 AI 网关控制台</Typography.Text>
               </div>
             </Space>
             <Space wrap>

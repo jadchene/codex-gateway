@@ -715,7 +715,15 @@ function listTokenLogs(db: Db, query: Partial<LogQuery> = {}): RequestLogPage {
     LEFT JOIN accounts ON accounts.id = request_logs.account_id
     WHERE ${filter.where}
   `).get(...filter.params).total;
-  return { items, total, page: range.page, pageSize: range.pageSize, startAt: range.startAt, endAt: range.endAt };
+  return {
+    items,
+    total,
+    page: range.page,
+    pageSize: range.pageSize,
+    startAt: range.startAt,
+    endAt: range.endAt,
+    query: logQueryFromRange(range)
+  };
 }
 
 function tokenSummary(db: Db, query: Partial<LogQuery> = {}): TokenSummary {
@@ -740,7 +748,15 @@ function tokenSummary(db: Db, query: Partial<LogQuery> = {}): TokenSummary {
   const byAccount = db.prepare(`
     SELECT
       request_logs.account_id,
-      COALESCE(accounts.name, request_logs.account_id, '未关联账号') AS account_name,
+      CASE
+        WHEN request_logs.account_id IS NOT NULL THEN COALESCE(accounts.name, request_logs.account_id)
+        ELSE NULL
+      END AS account_name,
+      CASE WHEN request_logs.account_id IS NULL THEN request_logs.upstream_id ELSE NULL END AS upstream_id,
+      CASE
+        WHEN request_logs.account_id IS NULL THEN COALESCE(MAX(request_logs.upstream_name), request_logs.upstream_id, '未识别渠道')
+        ELSE NULL
+      END AS upstream_name,
       COUNT(*) AS calls,
       COALESCE(SUM(input_tokens), 0) AS input_tokens,
       COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
@@ -750,7 +766,9 @@ function tokenSummary(db: Db, query: Partial<LogQuery> = {}): TokenSummary {
     FROM request_logs
     LEFT JOIN accounts ON accounts.id = request_logs.account_id
     WHERE ${filter.where}
-    GROUP BY request_logs.account_id
+    GROUP BY
+      request_logs.account_id,
+      CASE WHEN request_logs.account_id IS NULL THEN request_logs.upstream_id ELSE NULL END
     ORDER BY total_tokens DESC
   `).all(...filter.params);
   return { total, byAccount };
@@ -895,7 +913,33 @@ function listAppLogs(db: Db, query: Partial<LogQuery> = {}): AppLogPage {
   const total = db.prepare(`
     SELECT COUNT(*) AS total FROM app_logs WHERE ${where}
   `).get(...params).total;
-  return { items, total, page: range.page, pageSize: range.pageSize, startAt: range.startAt, endAt: range.endAt };
+  return {
+    items,
+    total,
+    page: range.page,
+    pageSize: range.pageSize,
+    startAt: range.startAt,
+    endAt: range.endAt,
+    query: logQueryFromRange(range)
+  };
+}
+
+function logQueryFromRange(range: ReturnType<typeof normalizeLogQuery>): LogQuery {
+  return {
+    page: range.page,
+    pageSize: range.pageSize,
+    startAt: range.startAt,
+    endAt: range.endAt,
+    ...(range.accountId ? { accountId: range.accountId } : {}),
+    ...(range.upstreamId ? { upstreamId: range.upstreamId } : {}),
+    ...(range.clientModel ? { clientModel: range.clientModel } : {}),
+    ...(range.upstreamModel ? { upstreamModel: range.upstreamModel } : {}),
+    ...(range.sessionId ? { sessionId: range.sessionId } : {}),
+    ...(range.status ? { status: range.status } : {}),
+    ...(range.keyword ? { keyword: range.keyword } : {}),
+    ...(range.level ? { level: range.level } : {}),
+    ...(range.scope ? { scope: range.scope } : {})
+  };
 }
 
 function normalizeLogQuery(query: Partial<LogQuery> = {}) {

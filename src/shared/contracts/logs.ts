@@ -62,11 +62,13 @@ export interface AppLog {
 export interface RequestLogPage extends PageResult<RequestLog> {
   startAt?: number;
   endAt?: number;
+  query?: LogQuery;
 }
 
 export interface AppLogPage extends PageResult<AppLog> {
   startAt?: number;
   endAt?: number;
+  query?: LogQuery;
 }
 
 export interface TokenTotals {
@@ -85,6 +87,8 @@ export interface TokenTotals {
 export interface TokenAccountSummary extends TokenTotals {
   account_id?: string | null;
   account_name?: string;
+  upstream_id?: string | null;
+  upstream_name?: string | null;
 }
 
 export interface TokenSummary {

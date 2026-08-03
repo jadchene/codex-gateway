@@ -171,7 +171,7 @@ export const AccountsPage = ({
       <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
         <div>
           <Typography.Title level={4}>订阅账号</Typography.Title>
-          <Typography.Text type="secondary">Token 由系统安全存储加密，renderer 只接收脱敏账号状态。</Typography.Text>
+          <Typography.Text type="secondary">添加和管理用于 Codex 的 ChatGPT 订阅账号。</Typography.Text>
         </div>
         <Space wrap>
           {loginId && <Button onClick={onCancelLogin}>取消等待授权</Button>}
@@ -206,7 +206,7 @@ export const AccountsPage = ({
           <Button block icon={<ImportOutlined />} onClick={() => runAddAction(onImportLocal)}>
             从本机 Codex 读取
           </Button>
-          <Typography.Text type="secondary">浏览器认证适合添加新账号；本地读取只导入当前 Codex 已登录账号。</Typography.Text>
+          <Typography.Text type="secondary">登录新账号请选择浏览器认证；也可以导入当前 Codex 已登录的账号。</Typography.Text>
         </Space>
       </Modal>
 
@@ -221,9 +221,15 @@ export const AccountsPage = ({
           { key: "plan", label: "套餐", children: detailAccount.subscription_plan || "未知" },
           { key: "state", label: "状态", children: detailAccount.enabled ? "启用" : "停用" },
           { key: "refresh", label: "最近刷新", children: detailAccount.last_refresh ? new Date(detailAccount.last_refresh).toLocaleString() : "暂无" },
-          { key: "token", label: "凭据状态", children: `Access ${detailAccount.has_access_token ? "已配置" : "缺失"} / Refresh ${detailAccount.has_refresh_token ? "已配置" : "缺失"}` }
+          {
+            key: "token",
+            label: "登录状态",
+            children: !detailAccount.has_access_token
+              ? "需要重新登录"
+              : detailAccount.has_refresh_token ? "正常，可自动续期" : "已登录，过期后需重新登录"
+          }
         ]} />}
-        <Typography.Title level={5} style={{ marginTop: 20 }}>Reset credits</Typography.Title>
+        <Typography.Title level={5} style={{ marginTop: 20 }}>重置次数</Typography.Title>
         <Typography.Paragraph type="secondary">当前可用 {resetCredits.availableCount} 次。</Typography.Paragraph>
         <Table<ResetCredit>
           rowKey={(credit, index) => `${credit.title || "credit"}-${credit.granted_at || 0}-${index}`}
