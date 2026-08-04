@@ -148,18 +148,19 @@ export function replaceGatewayProviderBlock(current: unknown, block: unknown): s
 }
 
 export function insertProviderBlockIntoConfig(current: unknown, block: unknown): string {
-  const normalizedBlock = `${String(block || "").trimEnd()}\n`;
   const text = String(current || "");
-  if (!text.trim()) return normalizedBlock;
+  const normalizedBlock = String(block || "").trimEnd();
+  if (!text.trim()) return `${normalizedBlock}\n`;
   const newline = text.includes("\r\n") ? "\r\n" : "\n";
   const lines = text.split(/\r?\n/);
-  const insertIndex = lines.findIndex((line) => line.trim() === "");
+  const insertIndex = lines.findIndex((line) => /^\s*(?:\[[^\[\]\r\n]+\]|\[\[[^\[\]\r\n]+\]\])\s*(?:#.*)?$/.test(line));
   if (insertIndex < 0) {
-    return `${text.trimEnd()}${newline}${newline}${normalizedBlock.replace(/\n/g, newline)}`;
+    return `${text.trimEnd()}${newline}${newline}${normalizedBlock.replace(/\n/g, newline)}${newline}`;
   }
-  const before = lines.slice(0, insertIndex).join(newline);
-  const after = lines.slice(insertIndex + 1).join(newline).replace(/^\r?\n/, "");
-  return `${before}${newline}${newline}${normalizedBlock.replace(/\n/g, newline)}${newline}${after}`;
+  const before = lines.slice(0, insertIndex).join(newline).trimEnd();
+  const after = lines.slice(insertIndex).join(newline);
+  const prefix = before ? `${before}${newline}${newline}` : "";
+  return `${prefix}${normalizedBlock.replace(/\n/g, newline)}${newline}${newline}${after}`;
 }
 
 export function removeGatewayProviderConfig(options: CodexPathOptions = {}): boolean {
@@ -256,29 +257,39 @@ export function writeFilesTransaction(entries: FileEntry[], verify: () => void =
   const transactionId = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const staged = entries.map(({ file, content }) => ({
     file,
+    target: resolveWriteTarget(file),
     content,
-    temp: `${file}.tmp-${transactionId}`,
-    backup: `${file}.bak-${transactionId}`,
-    existed: fs.existsSync(file),
+    temp: "",
+    backup: "",
+    existed: false,
     installed: false
   }));
+  const targets = new Set<string>();
+  for (const entry of staged) {
+    const normalizedTarget = path.normalize(entry.target).toLowerCase();
+    if (targets.has(normalizedTarget)) throw new Error(`Codex 文件写入目标重复：${entry.target}`);
+    targets.add(normalizedTarget);
+    entry.temp = `${entry.target}.tmp-${transactionId}`;
+    entry.backup = `${entry.target}.bak-${transactionId}`;
+    entry.existed = fs.existsSync(entry.target);
+  }
   let committed = false;
   try {
     for (const entry of staged) {
-      fs.mkdirSync(path.dirname(entry.file), { recursive: true });
+      fs.mkdirSync(path.dirname(entry.target), { recursive: true });
       fs.writeFileSync(entry.temp, entry.content, { encoding: "utf8", mode: 0o600 });
     }
     for (const entry of staged) {
-      if (entry.existed) fs.renameSync(entry.file, entry.backup);
-      fs.renameSync(entry.temp, entry.file);
+      if (entry.existed) fs.renameSync(entry.target, entry.backup);
+      fs.renameSync(entry.temp, entry.target);
       entry.installed = true;
     }
     verify();
     committed = true;
   } catch (error) {
     for (const entry of [...staged].reverse()) {
-      if (entry.installed) fs.rmSync(entry.file, { force: true });
-      if (entry.existed && fs.existsSync(entry.backup)) fs.renameSync(entry.backup, entry.file);
+      if (entry.installed) fs.rmSync(entry.target, { force: true });
+      if (entry.existed && fs.existsSync(entry.backup)) fs.renameSync(entry.backup, entry.target);
     }
     throw error;
   } finally {
@@ -291,6 +302,24 @@ export function writeFilesTransaction(entries: FileEntry[], verify: () => void =
           // A stale backup is safer than rolling back files that already passed verification.
         }
       }
+    }
+  }
+}
+
+function resolveWriteTarget(file: string): string {
+  let current = path.resolve(file);
+  const visited = new Set<string>();
+  while (true) {
+    const normalized = path.normalize(current).toLowerCase();
+    if (visited.has(normalized)) throw new Error(`Codex 文件软链接存在循环：${file}`);
+    visited.add(normalized);
+    try {
+      const stat = fs.lstatSync(current);
+      if (!stat.isSymbolicLink()) return current;
+      current = path.resolve(path.dirname(current), fs.readlinkSync(current));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return current;
+      throw error;
     }
   }
 }

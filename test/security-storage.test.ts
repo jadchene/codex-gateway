@@ -306,6 +306,53 @@ test("multi-file Codex writes roll back all files when verification fails", () =
   }
 });
 
+test("applying gateway mode preserves symbolic links and writes their targets", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-auth-links-"));
+  const codexDirectory = path.join(directory, "codex");
+  const targetDirectory = path.join(directory, "targets");
+  const authTarget = path.join(targetDirectory, "auth.json");
+  const configTarget = path.join(targetDirectory, "config.toml");
+  const authLink = path.join(codexDirectory, "auth.json");
+  const configLink = path.join(codexDirectory, "config.toml");
+  fs.mkdirSync(codexDirectory, { recursive: true });
+  fs.mkdirSync(targetDirectory, { recursive: true });
+  fs.writeFileSync(authTarget, "{}\n", "utf8");
+  fs.writeFileSync(configTarget, 'model = "gpt-selected"\n', "utf8");
+  fs.symlinkSync(authTarget, authLink, "file");
+  fs.symlinkSync(configTarget, configLink, "file");
+  try {
+    applyGatewayMode({
+      gateway_api_key: "local-test-key",
+      gateway_host: "localhost",
+      gateway_port: "8436"
+    }, { codexDir: codexDirectory, modelCatalogPath: path.join(directory, "models.json") });
+
+    assert.equal(fs.lstatSync(authLink).isSymbolicLink(), true);
+    assert.equal(fs.lstatSync(configLink).isSymbolicLink(), true);
+    assert.equal(JSON.parse(fs.readFileSync(authTarget, "utf8")).OPENAI_API_KEY, "local-test-key");
+    assert.match(fs.readFileSync(configTarget, "utf8"), /^model_provider = "codex_gateway"/m);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("transaction rollback preserves symbolic links and restores their targets", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-auth-link-rollback-"));
+  const target = path.join(directory, "target.json");
+  const link = path.join(directory, "auth.json");
+  fs.writeFileSync(target, "old-auth", "utf8");
+  fs.symlinkSync(target, link, "file");
+  try {
+    assert.throws(() => writeFilesTransaction([{ file: link, content: "new-auth" }], () => {
+      throw new Error("verify failed");
+    }), /verify failed/);
+    assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+    assert.equal(fs.readFileSync(target, "utf8"), "old-auth");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("MCP process late exit cannot clear a restarted process", async () => {
   const children = [];
   const service = createMcpGatewayService({ getSettings: () => ({}) }, {

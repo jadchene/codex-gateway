@@ -773,9 +773,11 @@ test("isAuthExpiredResponse detects expired token failures", () => {
   assert.equal(isAuthExpiredResponse(403, Buffer.from('{"detail":"quota exceeded"}')), false);
 });
 
-test("insertProviderBlockIntoConfig inserts at first blank line", () => {
+test("insertProviderBlockIntoConfig keeps all root keys before the first table", () => {
   const current = [
     'model = "gpt-5.4"',
+    "",
+    'approval_policy = "on-request"',
     "",
     "[notice.model_migrations]",
     '"gpt-5.3-codex" = "gpt-5.4"',
@@ -792,8 +794,9 @@ test("insertProviderBlockIntoConfig inserts at first blank line", () => {
     ""
   ].join("\n");
   const next = insertProviderBlockIntoConfig(current, block);
-  assert.match(next, /^model = "gpt-5\.4"\n\nmodel_provider = "codex_gateway"/);
+  assert.match(next, /^model = "gpt-5\.4"\n\napproval_policy = "on-request"\n\nmodel_provider = "codex_gateway"/);
   assert.match(next, /base_url = "http:\/\/localhost:8436\/v1"\n\n\[notice\.model_migrations\]/);
+  assert.ok(next.indexOf('approval_policy = "on-request"') < next.indexOf('model_provider = "codex_gateway"'));
   assert.ok(next.indexOf('model_provider = "codex_gateway"') < next.indexOf("[notice.model_migrations]"));
 });
 
