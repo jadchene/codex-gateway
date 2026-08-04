@@ -47,12 +47,13 @@ describe("Ant Design pages", () => {
   });
 
   it("renders overview model channel metrics", async () => {
-    renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} mcpGateway={{ running: false }} tokenSummary={emptySummary} quotaSummary={{ capacity_percent: 200, primary: { remaining_percent: 170 }, secondary: { remaining_percent: 150 } }} settings={{}} />);
+    renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} mcpGateway={{ running: false }} tokenSummary={emptySummary} quotaSummary={{ capacity_percent: 200, primary: { remaining_percent: 115 }, secondary: { remaining_percent: 150 } }} settings={{}} />);
     expect(screen.getByRole("heading", { name: "运行概览" })).toBeTruthy();
     await waitFor(() => expect(window.codexGateway.listUpstreams).toHaveBeenCalled());
     expect(await screen.findByText("可选模型")).toBeTruthy();
     expect(screen.getByText("缓存命中率")).toBeTruthy();
-    expect(screen.getByText("170.0%")).toBeTruthy();
+    expect(screen.getByText("115.0%")).toBeTruthy();
+    expect(screen.getByText("57.5%")).toBeTruthy();
     expect(screen.getByText("150.0%")).toBeTruthy();
   });
 

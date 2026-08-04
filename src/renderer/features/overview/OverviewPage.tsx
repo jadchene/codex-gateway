@@ -153,7 +153,7 @@ const MetricCard = ({
 
 const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDetail | undefined; capacity: number | undefined }) => {
   const remaining = Math.max(0, Number(detail?.remaining_percent || 0));
-  const progress = Math.max(0, Math.min(100, remaining / Math.max(1, Number(capacity || 100)) * 100));
+  const progress = Math.round(Math.max(0, Math.min(100, remaining / Math.max(1, Number(capacity || 100)) * 100)) * 10) / 10;
   return (
     <Card className="v1-overview-card">
       <Flex align="center" justify="space-between" gap={16}>
