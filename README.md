@@ -10,10 +10,12 @@ Codex Gateway is a Windows desktop app for using ChatGPT subscription accounts a
 
 ## Why Use It
 
-- Switch between subscription and third-party models from the Codex model picker.
-- View account quotas, channel balances, request usage, latency, and estimated cost.
-- Keep account and channel configuration in a local `data/` directory beside the app.
-- Manage the local API service and optional MCP service from one interface.
+- Turn ChatGPT subscription accounts into a local API service.
+- Connect third-party models through Responses API channels.
+- Switch easily between subscription and third-party models from the Codex model picker.
+- Integrate and manage an optional MCP Gateway from the same desktop app.
+- Quickly view and use available Bank Reset cards for subscription accounts.
+- Estimate request costs from each model's input, cached-input, and output prices.
 
 ## Quick Start
 
