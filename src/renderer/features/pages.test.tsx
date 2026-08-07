@@ -35,26 +35,51 @@ describe("Ant Design pages", () => {
         mcpGatewayRunning={false}
         onNavigate={vi.fn()}
         pages={[
-          { id: "upstreams", label: "模型渠道" },
-          { id: "codexIntegration", label: "接入模式" }
+          { id: "upstreams", label: "模型渠道", description: "管理模型渠道。" },
+          { id: "codexIntegration", label: "接入模式", description: "选择接入方式。" }
         ]}
       >
         <div>页面内容</div>
       </AppShell>
     );
     expect(screen.getAllByText("模型渠道")).toHaveLength(2);
+    expect(screen.getByText("管理模型渠道。")).toBeTruthy();
     expect(screen.getByText("接入模式")).toBeTruthy();
+    expect(screen.getByText("API 已停止")).toBeTruthy();
+    expect(screen.getByText("MCP 已停止")).toBeTruthy();
   });
 
   it("renders overview model channel metrics", async () => {
-    renderWithQueries(<OverviewPage accounts={[]} gateway={{ running: false }} mcpGateway={{ running: false }} tokenSummary={emptySummary} quotaSummary={{ capacity_percent: 200, primary: { remaining_percent: 115 }, secondary: { remaining_percent: 150 } }} settings={{}} />);
-    expect(screen.getByRole("heading", { name: "运行概览" })).toBeTruthy();
+    const user = userEvent.setup();
+    const onRefreshAccounts = vi.fn().mockResolvedValue(undefined);
+    renderWithQueries(<OverviewPage
+      accounts={[]}
+      gateway={{ running: true, url: "http://localhost:8436", activeHttpRequests: 2, activeWebSockets: 3 }}
+      gatewayBase="http://localhost:8436/v1"
+      mcpGateway={{ running: true, url: "http://127.0.0.1:3000/mcp" }}
+      tokenSummary={{ total: { calls: 12, total_tokens: 1000, input_tokens: 800, cached_input_tokens: 400, average_duration_ms: 250, errors: 2, estimated_cost: 0.12 }, byAccount: [] }}
+      quotaSummary={{ capacity_percent: 200, primary: { remaining_percent: 115 }, secondary: { remaining_percent: 150 } }}
+      settings={{}}
+      onRefreshAccounts={onRefreshAccounts}
+    />);
+    expect(screen.getByRole("button", { name: /刷新额度/ })).toBeTruthy();
+    expect(screen.getByText("API 服务")).toBeTruthy();
+    expect(screen.getByText("MCP 服务")).toBeTruthy();
     await waitFor(() => expect(window.codexGateway.listUpstreams).toHaveBeenCalled());
     expect(await screen.findByText("可选模型")).toBeTruthy();
-    expect(screen.getByText("缓存命中率")).toBeTruthy();
+    expect(screen.getByText("缓存命中")).toBeTruthy();
+    expect(screen.getByText("平均耗时")).toBeTruthy();
+    expect(screen.getByText("估算成本（USD）")).toBeTruthy();
+    expect(screen.queryByText("今日调用统计")).toBeNull();
     expect(screen.getByText("115.0%")).toBeTruthy();
+    expect(screen.getByText("http://localhost:8436/v1")).toBeTruthy();
     expect(screen.getByText("57.5%")).toBeTruthy();
     expect(screen.getByText("150.0%")).toBeTruthy();
+    await user.hover(screen.getByText("1,000"));
+    expect(await screen.findByText("输入：800")).toBeTruthy();
+    expect(screen.getByText("缓存命中率：50.0%")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /刷新额度/ }));
+    expect(onRefreshAccounts).toHaveBeenCalledOnce();
   });
 
   it("opens account browser login", async () => {
@@ -72,7 +97,6 @@ describe("Ant Design pages", () => {
   it("requires Codex model JSON when adding an API upstream", async () => {
     const user = userEvent.setup();
     renderWithQueries(<UpstreamsPage />);
-    expect(screen.getByRole("heading", { name: "模型渠道" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /新增渠道/ }));
     expect(screen.getByText("Codex 模型 JSON")).toBeTruthy();
     expect(screen.getByText(/用于读取模型及其支持的能力/)).toBeTruthy();
@@ -97,6 +121,8 @@ describe("Ant Design pages", () => {
       mcpGatewayUrl="http://127.0.0.1:3000/mcp" mcpGatewayCommand="mcp-gateway-service --http"
       onToggleGateway={onToggleGateway}
       onToggleMcpGateway={vi.fn()} onRestartGateway={vi.fn()} onRestartMcpGateway={vi.fn()} onMessage={vi.fn()} />);
+    expect(screen.getByText("API 服务")).toBeTruthy();
+    expect(screen.getByText("MCP 服务")).toBeTruthy();
     await user.click(screen.getAllByRole("button", { name: /启动/ })[0]!);
     expect(onToggleGateway).toHaveBeenCalledOnce();
   });
@@ -127,7 +153,8 @@ describe("Ant Design pages", () => {
       total: { total_tokens: 1524, input_tokens: 1000, cached_input_tokens: 400, output_tokens: 524 },
       byAccount: [
         { account_id: null, upstream_id: "deepseek", upstream_name: "DeepSeek API", total_tokens: 555, input_tokens: 400, cached_input_tokens: 100, output_tokens: 155 },
-        { account_id: null, upstream_id: "qwen", upstream_name: "Qwen API", total_tokens: 333, input_tokens: 200, cached_input_tokens: 50, output_tokens: 133 }
+        { account_id: null, upstream_id: "qwen", upstream_name: "Qwen API", total_tokens: 333, input_tokens: 200, cached_input_tokens: 50, output_tokens: 133 },
+        { account_id: "account-a", account_name: "账号 A", upstream_id: "subscription", upstream_name: "订阅账号池", total_tokens: 636, input_tokens: 400, cached_input_tokens: 250, output_tokens: 236 }
       ]
     };
     renderWithQueries(<RequestAnalyticsPage pageData={pageData} summary={summary} accounts={[]} settings={{ billing_currency: "CNY" }} onMessage={vi.fn()} onQuery={onQuery} />);
@@ -141,6 +168,16 @@ describe("Ant Design pages", () => {
     expect(screen.queryByText("session-only-in-detail")).toBeNull();
     expect(screen.getByText("DeepSeek API")).toBeTruthy();
     expect(screen.getByText("Qwen API")).toBeTruthy();
+    expect(screen.getByText("GPT 账号池")).toBeTruthy();
+    await user.hover(screen.getByText("DeepSeek API"));
+    expect(await screen.findByText("输出：155")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "展开 GPT 账号池" }));
+    expect(screen.getByText("账号 A")).toBeTruthy();
+    expect(screen.queryByText("GPT 账号池")).toBeNull();
+    await user.hover(screen.getByText("账号 A"));
+    expect(await screen.findByText("输出：236")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回 GPT 账号池：账号 A" }));
+    expect(screen.getByText("GPT 账号池")).toBeTruthy();
     await user.hover(screen.getByText("1,524"));
     expect(await screen.findByText("缓存命中率：40.0%")).toBeTruthy();
     await user.click(screen.getByText("订阅账号池"));
@@ -200,14 +237,18 @@ describe("Ant Design pages", () => {
   it("applies Codex gateway mode", async () => {
     const user = userEvent.setup();
     const onApplyGateway = vi.fn().mockResolvedValue(undefined);
+    const onSaveSettings = vi.fn().mockResolvedValue(undefined);
     render(<CodexIntegrationPage settings={{ codex_auth_mode: "" }} accounts={[]} gatewayBase="http://localhost:8436/v1" modelCatalogPath="D:/data/models.json"
-      onMessage={vi.fn()} onApplyGateway={onApplyGateway} onApplyAccount={vi.fn()} />);
-    expect(screen.getByRole("heading", { name: "接入模式" })).toBeTruthy();
+      onMessage={vi.fn()} onSaveSettings={onSaveSettings} onApplyGateway={onApplyGateway} onApplyAccount={vi.fn()} />);
+    expect(screen.getByRole("radio", { name: /网关模式/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /网关模式/ }));
     expect(screen.getByText(/model_catalog_json = "D:\/data\/models\.json"/)).toBeTruthy();
     expect(screen.getByText(/openai_base_url = "http:\/\/localhost:8436\/v1"/)).toBeTruthy();
     expect(screen.queryByText(/model_provider = "openai"/)).toBeNull();
+    await user.click(screen.getByText("自定义 Provider"));
+    expect(screen.getByText(/model_provider = "codex_gateway"/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
+    expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ codex_config_use_openai_base_url: "false" }));
     expect(onApplyGateway).toHaveBeenCalledOnce();
   });
 });

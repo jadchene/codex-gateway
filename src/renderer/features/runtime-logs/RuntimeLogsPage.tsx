@@ -53,11 +53,7 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
 
   return (
     <Card className="v1-page-card v1-page-fill" variant="borderless">
-      <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
-        <div>
-          <Typography.Title level={4}>运行日志</Typography.Title>
-          <Typography.Text type="secondary">查看网关运行记录和错误信息。</Typography.Text>
-        </div>
+      <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
         <Space>
           {paused && newLogCount > 0 && <Tag color="processing">收到 {newLogCount} 批新日志</Tag>}
           <Button icon={paused ? <PlayCircleOutlined /> : <PauseOutlined />} onClick={() => onPausedChange(!paused)}>

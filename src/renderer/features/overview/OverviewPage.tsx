@@ -1,15 +1,14 @@
 import {
   ApiOutlined,
-  CloudServerOutlined,
   DashboardOutlined,
   ReloadOutlined,
   TeamOutlined
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Flex, List, Progress, Row, Space, Statistic, Typography } from "antd";
+import { Alert, Button, Card, Col, Flex, List, Progress, Row, Space, Statistic, Tooltip, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { AppLog, TokenSummary } from "../../../shared/contracts/logs";
-import { cacheHitRate } from "../../lib/formatters";
+import { cacheHitRate, formatTokenNumber } from "../../lib/formatters";
 
 type SettingsRecord = Record<string, string>;
 
@@ -26,6 +25,7 @@ interface AccountSummary {
 interface OverviewPageProps {
   accounts: AccountSummary[];
   gateway: { running?: boolean; url?: string; activeHttpRequests?: number; activeWebSockets?: number };
+  gatewayBase: string;
   mcpGateway: { running?: boolean; url?: string };
   tokenSummary: TokenSummary;
   quotaSummary: {
@@ -47,6 +47,7 @@ interface QuotaDetail {
 export const OverviewPage = ({
   accounts,
   gateway,
+  gatewayBase,
   mcpGateway,
   tokenSummary,
   quotaSummary,
@@ -72,49 +73,37 @@ export const OverviewPage = ({
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <div className="v1-page-card">
-        <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
-          <div>
-            <Typography.Title level={4}>运行概览</Typography.Title>
-            <Typography.Text type="secondary">快速查看服务状态、账号额度和今日调用。</Typography.Text>
-          </div>
-        </Flex>
         <Flex gap={8} wrap className="v1-table-toolbar">
-          <Button type="primary" onClick={() => void onToggleGateway?.()}>{gateway.running ? "停止网关" : "启动网关"}</Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void onRefreshAccounts?.()}>刷新订阅额度</Button>
+          <Button type="primary" onClick={() => void onToggleGateway?.()}>{gateway.running ? "停止 API 服务" : "启动 API 服务"}</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => void onRefreshAccounts?.()}>刷新额度</Button>
         </Flex>
         <Row gutter={[16, 16]}>
           <MetricCard icon={<TeamOutlined />} title="可用订阅账号" value={`${usableAccounts}/${accounts.length}`} />
           <MetricCard icon={<ApiOutlined />} title="可用第三方渠道" value={`${healthyApiUpstreams}/${apiUpstreams.length}`} loading={upstreamQuery.isLoading} />
           <MetricCard icon={<DashboardOutlined />} title="可选模型" value={modelCount} loading={upstreamQuery.isLoading} />
-          <MetricCard icon={<CloudServerOutlined />} title="今日调用" value={total.calls || 0} />
         </Row>
       </div>
 
-      <Card title="服务地址" className="v1-overview-card">
-        <Row gutter={[16, 12]}>
-          <Col xs={24} lg={12}><Typography.Text type="secondary">Codex Gateway</Typography.Text><Typography.Text className="v1-block v1-mono">{gateway.url || "未启动"}</Typography.Text></Col>
-          <Col xs={24} lg={12}><Typography.Text type="secondary">MCP Gateway</Typography.Text><Typography.Text className="v1-block v1-mono">{mcpGateway.url || "未启动"}</Typography.Text></Col>
-        </Row>
-      </Card>
-
       <Row gutter={[16, 16]}>
+        <Col xs={24} xl={settings.ignore_five_hour_limit === "true" ? 12 : 8}>
+          <ServiceAddressCard gatewayBase={gateway.running ? gatewayBase : "未启动"} mcpGatewayUrl={mcpGateway.url || "未启动"} />
+        </Col>
         {settings.ignore_five_hour_limit !== "true" && (
-          <Col xs={24} xl={12}><QuotaCard title="5 小时剩余额度" detail={quotaSummary.primary} capacity={quotaSummary.capacity_percent} /></Col>
+          <Col xs={24} md={12} xl={8}><QuotaCard title="5 小时剩余额度" detail={quotaSummary.primary} capacity={quotaSummary.capacity_percent} /></Col>
         )}
-        <Col xs={24} xl={settings.ignore_five_hour_limit === "true" ? 24 : 12}>
+        <Col xs={24} md={12} xl={settings.ignore_five_hour_limit === "true" ? 12 : 8}>
           <QuotaCard title="7 天剩余额度" detail={quotaSummary.secondary} capacity={quotaSummary.capacity_percent} />
         </Col>
       </Row>
 
-      <Card title="今日调用统计" className="v1-overview-card">
+      <Card title="今日调用" className="v1-overview-card">
         <Row gutter={[16, 20]}>
-          <StatisticColumn title="总 Token" value={total.total_tokens || 0} />
-          <StatisticColumn title="输入（未命中）" value={Math.max(0, Number(total.input_tokens || 0) - Number(total.cached_input_tokens || 0))} />
-          <StatisticColumn title="缓存输入" value={total.cached_input_tokens || 0} />
-          <StatisticColumn title="输出 Token" value={total.output_tokens || 0} />
-          <StatisticColumn title="缓存命中率" value={cacheHitRate(total.input_tokens, total.cached_input_tokens)} precision={1} suffix="%" />
-          <StatisticColumn title={`估算成本（${settings.billing_currency || "USD"}）`} value={Number(total.estimated_cost || 0)} precision={4} />
+          <StatisticColumn title="调用" value={total.calls || 0} />
+          <StatisticColumn title="总 Token" value={total.total_tokens || 0} tooltip={<TokenUsageDetails usage={total} />} />
+          <StatisticColumn title="缓存命中" value={cacheHitRate(total.input_tokens, total.cached_input_tokens)} precision={1} suffix="%" />
+          <StatisticColumn title="平均耗时" value={Number(total.average_duration_ms || 0)} precision={0} suffix="ms" />
           <StatisticColumn title="错误" value={Number(total.errors || 0)} />
+          <StatisticColumn title={`估算成本（${settings.billing_currency || "USD"}）`} value={Number(total.estimated_cost || 0)} precision={4} />
         </Row>
       </Card>
 
@@ -141,7 +130,7 @@ const MetricCard = ({
   value: string | number;
   loading?: boolean;
 }) => (
-  <Col xs={24} sm={12} xl={6}>
+  <Col xs={24} sm={12} xl={8}>
     <Card loading={loading} className="v1-overview-card">
       <Flex align="center" gap={14}>
         <div className="v1-overview-icon">{icon}</div>
@@ -151,11 +140,39 @@ const MetricCard = ({
   </Col>
 );
 
+const ServiceAddressCard = ({ gatewayBase, mcpGatewayUrl }: { gatewayBase: string; mcpGatewayUrl: string }) => (
+  <Card className="v1-overview-card v1-overview-status-card">
+    <Typography.Text type="secondary">服务地址</Typography.Text>
+    <div className="v1-overview-addresses">
+      <div className="v1-overview-address-row">
+        <Typography.Text type="secondary">API 服务</Typography.Text>
+        <Typography.Text
+          className="v1-overview-address-value v1-mono"
+          ellipsis={{ tooltip: gatewayBase }}
+          copyable={{ text: gatewayBase }}
+        >
+          {gatewayBase}
+        </Typography.Text>
+      </div>
+      <div className="v1-overview-address-row">
+        <Typography.Text type="secondary">MCP 服务</Typography.Text>
+        <Typography.Text
+          className="v1-overview-address-value v1-mono"
+          ellipsis={{ tooltip: mcpGatewayUrl }}
+          copyable={{ text: mcpGatewayUrl }}
+        >
+          {mcpGatewayUrl}
+        </Typography.Text>
+      </div>
+    </div>
+  </Card>
+);
+
 const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDetail | undefined; capacity: number | undefined }) => {
   const remaining = Math.max(0, Number(detail?.remaining_percent || 0));
   const progress = Math.round(Math.max(0, Math.min(100, remaining / Math.max(1, Number(capacity || 100)) * 100)) * 10) / 10;
   return (
-    <Card className="v1-overview-card">
+    <Card className="v1-overview-card v1-overview-status-card">
       <Flex align="center" justify="space-between" gap={16}>
         <div>
           <Typography.Text type="secondary">{title}</Typography.Text>
@@ -172,16 +189,33 @@ const StatisticColumn = ({
   title,
   value,
   precision,
-  suffix
+  suffix,
+  tooltip
 }: {
   title: string;
   value: number;
   precision?: number;
   suffix?: string;
+  tooltip?: ReactNode;
 }) => (
-  <Col xs={12} lg={8} xl={6}>
-    <Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} {...(suffix === undefined ? {} : { suffix })} />
+  <Col xs={12} lg={8} xl={4}>
+    {tooltip ? (
+      <Tooltip title={tooltip}>
+        <div><Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} {...(suffix === undefined ? {} : { suffix })} /></div>
+      </Tooltip>
+    ) : (
+      <Statistic title={title} value={value} {...(precision === undefined ? {} : { precision })} {...(suffix === undefined ? {} : { suffix })} />
+    )}
   </Col>
+);
+
+const TokenUsageDetails = ({ usage }: { usage: TokenSummary["total"] }) => (
+  <div className="v1-token-tooltip">
+    <div>输入：{formatTokenNumber(usage.input_tokens)}</div>
+    <div>缓存输入：{formatTokenNumber(usage.cached_input_tokens)}</div>
+    <div>输出：{formatTokenNumber(usage.output_tokens)}</div>
+    <div>缓存命中率：{cacheHitRate(usage.input_tokens, usage.cached_input_tokens).toFixed(1)}%</div>
+  </div>
 );
 
 const isUsableAccount = (account: AccountSummary, settings: SettingsRecord): boolean => {

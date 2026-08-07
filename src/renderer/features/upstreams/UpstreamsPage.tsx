@@ -1,11 +1,8 @@
 import {
   DeleteOutlined,
   EditOutlined,
-  ExperimentOutlined,
   MoreOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  WalletOutlined
+  PlusOutlined
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -202,11 +199,11 @@ export const UpstreamsPage = () => {
   };
 
   const moreItems = (upstream: UpstreamSummary): NonNullable<MenuProps["items"]> => upstream.kind === "chatgpt_subscription_pool"
-    ? [{ key: "refresh-models", label: "刷新内置模型", icon: <ReloadOutlined /> }]
+    ? [{ key: "refresh-models", label: "刷新内置模型" }]
     : [
-      { key: "health", label: "连接检查", icon: <ExperimentOutlined /> },
-      { key: "invoke", label: "调用测试", icon: <ExperimentOutlined /> },
-      ...(upstream.balanceQueryType !== "none" ? [{ key: "balance", label: "刷新余额", icon: <WalletOutlined /> }] : [])
+      { key: "health", label: "连接检查" },
+      { key: "invoke", label: "调用测试" },
+      ...(upstream.balanceQueryType !== "none" ? [{ key: "balance", label: "刷新余额" }] : [])
     ];
 
   const onMore = (upstream: UpstreamSummary, key: string) => {
@@ -262,11 +259,7 @@ export const UpstreamsPage = () => {
   ];
 
   return <section className="v1-page-card v1-page-fill v1-upstreams-page">
-    <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
-      <div>
-        <Typography.Title level={4}>模型渠道</Typography.Title>
-        <Typography.Text type="secondary">管理订阅账号池和第三方模型，并设置连接方式与模型费率。</Typography.Text>
-      </div>
+    <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
       <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增渠道</Button>
     </Flex>
     <Table
@@ -337,8 +330,8 @@ export const UpstreamsPage = () => {
       </Form>
     </Drawer>
 
-    <Drawer title={`${modelUpstream?.name || ""} · 模型目录`} width={900} open={Boolean(modelUpstream)} onClose={() => setModelUpstream(null)}>
-      <Table rowKey="modelId" pagination={false} dataSource={modelsQuery.data ?? []} loading={modelsQuery.isLoading} columns={modelColumns(currency)} scroll={{ x: 800 }} />
+    <Drawer title={`${modelUpstream?.name || ""} · 模型目录`} width="min(1000px, 100vw)" open={Boolean(modelUpstream)} onClose={() => setModelUpstream(null)}>
+      <Table rowKey="modelId" pagination={false} dataSource={modelsQuery.data ?? []} loading={modelsQuery.isLoading} columns={modelColumns(currency)} scroll={{ x: 920 }} />
     </Drawer>
 
     <Modal
@@ -394,11 +387,10 @@ const PoolQuota = ({ label, total, capacity }: { label: string; total: number; c
 );
 
 const modelColumns = (currency: string): TableColumnsType<UpstreamModel> => [
-  { title: "模型 ID", dataIndex: "modelId", width: 220, ellipsis: true, render: (value) => <Typography.Text className="v1-mono" copyable>{value}</Typography.Text> },
+  { title: "模型 ID", dataIndex: "modelId", width: 190, ellipsis: true, render: (value) => <Typography.Text className="v1-mono" copyable>{value}</Typography.Text> },
   { title: "显示名称", dataIndex: "displayName", width: 180, ellipsis: true },
-  { title: "推理程度", width: 180, render: (_, model) => reasoningLevels(model.metadata).join(" / ") || "-" },
-  { title: `费率（${currency}）`, width: 270, render: (_, model) => `${model.pricing.inputPerMillion.toFixed(4)} / ${model.pricing.cachedInputPerMillion.toFixed(4)} / ${model.pricing.outputPerMillion.toFixed(4)}` },
-  { title: "WS", width: 80, render: (_, model) => <Tag color={model.metadata.supports_websockets ? "cyan" : "default"}>{model.metadata.supports_websockets ? "支持" : "HTTP"}</Tag> }
+  { title: "推理程度", width: 310, render: (_, model) => <Typography.Text className="v1-nowrap">{reasoningLevels(model.metadata).join(" / ") || "-"}</Typography.Text> },
+  { title: `费率（${currency}）`, width: 240, render: (_, model) => `${model.pricing.inputPerMillion.toFixed(4)} / ${model.pricing.cachedInputPerMillion.toFixed(4)} / ${model.pricing.outputPerMillion.toFixed(4)}` }
 ];
 
 function modelEntries(raw: string): Array<{ slug: string; metadata: Record<string, unknown> }> {

@@ -18,14 +18,14 @@ const RequestAnalyticsPage = React.lazy(() => import("./features/request-analyti
 const RuntimeLogsPage = React.lazy(() => import("./features/runtime-logs/RuntimeLogsPage").then((module) => ({ default: module.RuntimeLogsPage })));
 
 const pages = [
-  { id: "overview", label: "概览" },
-  { id: "accounts", label: "订阅账号" },
-  { id: "upstreams", label: "模型渠道" },
-  { id: "services", label: "服务管理" },
-  { id: "analytics", label: "调用分析" },
-  { id: "runtimeLogs", label: "运行日志" },
-  { id: "codexIntegration", label: "接入模式" },
-  { id: "settings", label: "设置中心" }
+  { id: "overview", label: "运行概览", description: "快速查看服务状态、可用额度和调用概况。" },
+  { id: "accounts", label: "订阅账号", description: "添加和管理用于 Codex 的 ChatGPT 订阅账号。" },
+  { id: "upstreams", label: "模型渠道", description: "管理订阅账号池和第三方模型，并设置连接方式与模型费率。" },
+  { id: "services", label: "服务管理", description: "启动、停止或重启本地 API 与 MCP 服务。" },
+  { id: "codexIntegration", label: "接入模式", description: "选择 Codex 使用本地网关，或直接使用一个订阅账号。" },
+  { id: "analytics", label: "调用分析", description: "按渠道、模型和账号查看调用量、Token、耗时与费用。" },
+  { id: "runtimeLogs", label: "运行日志", description: "查看网关运行记录和错误信息。" },
+  { id: "settings", label: "设置中心", description: "调整应用、网关、额度、日志和外观设置。" }
 ];
 
 function App() {
@@ -190,6 +190,10 @@ function App() {
   async function saveSettings(next: Settings): Promise<Settings> {
     try {
       const quotaModeChanged = next.ignore_five_hour_limit !== settings.ignore_five_hour_limit;
+      const restartRequired = (gateway.running || mcpGateway.running) && Object.entries(next).some(
+        ([key, value]) => value !== settings[key] && !key.startsWith("appearance_") && key !== "navigation_collapsed"
+      );
+      const restartReminder = restartRequired ? "，请重启网关使配置生效" : "";
       const saved = await api.saveSettings(next);
       setSettings(saved);
       applyAppearancePreferences(appearanceFromSettings(saved));
@@ -197,11 +201,11 @@ function App() {
         try {
           setQuotaSummary(await api.quotaSummary());
         } catch (error) {
-          setMessage(`配置已保存，但额度汇总刷新失败：${errorMessage(error)}`);
+          setMessage(`配置已保存${restartReminder}；额度汇总刷新失败：${errorMessage(error)}`);
           return saved;
         }
       }
-      setMessage("配置已保存");
+      setMessage(`配置已保存${restartReminder}`);
       return saved;
     } catch (error) {
       setMessage(`保存配置失败：${errorMessage(error)}`);
@@ -391,6 +395,7 @@ function App() {
         {page === "overview" && <OverviewPage
           accounts={accounts}
           gateway={gateway}
+          gatewayBase={gatewayBase}
           mcpGateway={mcpGateway}
           tokenSummary={dashboardSummary}
           quotaSummary={quotaSummary}
@@ -435,6 +440,7 @@ function App() {
             gatewayBase={gatewayBase}
             modelCatalogPath={`${paths.dataDir.replace(/[\\/]+$/, "")}/models.json`}
             onMessage={setMessage}
+            onSaveSettings={saveSettings}
             onApplyGateway={async () => {
               const result = await api.applyGatewayAuth();
               await reload();
@@ -465,8 +471,6 @@ function App() {
           <SettingsPage
             settings={settings}
             paths={paths}
-            gatewayRunning={gateway.running}
-            mcpGatewayRunning={mcpGateway.running}
             onSave={saveSettings}
             onMessage={setMessage}
             onClearTokenLogs={clearTokenLogs}

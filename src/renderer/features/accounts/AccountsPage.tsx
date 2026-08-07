@@ -172,11 +172,7 @@ export const AccountsPage = ({
 
   return (
     <Card className="v1-page-card v1-page-fill" variant="borderless">
-      <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
-        <div>
-          <Typography.Title level={4}>订阅账号</Typography.Title>
-          <Typography.Text type="secondary">添加和管理用于 Codex 的 ChatGPT 订阅账号。</Typography.Text>
-        </div>
+      <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
         <Space wrap>
           {loginId && <Button onClick={onCancelLogin}>取消等待授权</Button>}
           <Button icon={<ReloadOutlined />} onClick={onRefreshAll}>刷新全部</Button>

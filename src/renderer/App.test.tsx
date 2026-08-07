@@ -11,7 +11,13 @@ afterEach(() => cleanup());
 
 it("refreshes the quota summary after the five-hour limit setting changes", async () => {
   const user = userEvent.setup();
-  const settings = { ignore_five_hour_limit: "true" };
+  const settings = {
+    ignore_five_hour_limit: "true",
+    usage_refresh_interval_secs: "900",
+    usage_refresh_timeout_ms: "20000",
+    gateway_quota_cooldown_ms: "60000",
+    codex_quota_headers_mode: "block"
+  };
   const quotaSummary = vi.fn().mockResolvedValue({
     capacity_percent: 200,
     primary: { remaining_percent: 170 },
@@ -30,7 +36,7 @@ it("refreshes the quota summary after the five-hour limit setting changes", asyn
         secondary: { remaining_percent: 150 }
       },
       appLogs: { items: [], total: 0, page: 1, pageSize: 10 },
-      gateway: { running: false },
+      gateway: { running: true },
       mcpGateway: { running: false },
       paths: { dataDir: "", dbPath: "" }
     }),
@@ -48,12 +54,15 @@ it("refreshes the quota summary after the five-hour limit setting changes", asyn
     </MemoryRouter>
   );
 
+  await user.click(await screen.findByRole("menuitem", { name: "账号与额度" }));
   await screen.findByText("忽略 5 小时限制");
+  expect(screen.queryByText("重启服务后生效")).toBeNull();
   await user.click(screen.getByRole("switch"));
   await user.click(screen.getByRole("button", { name: /保存设置/ }));
   await waitFor(() => expect(quotaSummary).toHaveBeenCalledOnce());
+  expect(screen.getByRole("status").textContent).toContain("配置已保存，请重启网关使配置生效");
 
-  await user.click(screen.getByText("概览"));
+  await user.click(screen.getByText("运行概览"));
   expect(await screen.findByText("170.0%")).toBeTruthy();
   expect(screen.getByText("150.0%")).toBeTruthy();
 });

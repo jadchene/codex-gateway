@@ -1,11 +1,12 @@
 import { CheckCircleOutlined, KeyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Flex, Radio, Select, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Flex, Radio, Segmented, Select, Space, Tag, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
 import { isUsableAccount } from "../../lib/formatters";
 
 type AuthMode = "gateway" | "account" | "";
+type GatewayConfigMode = "base_url" | "provider";
 
 interface CodexIntegrationPageProps {
   settings: Settings;
@@ -13,6 +14,7 @@ interface CodexIntegrationPageProps {
   gatewayBase: string;
   modelCatalogPath: string;
   onMessage: (message: string) => void;
+  onSaveSettings: (settings: Settings) => Promise<unknown>;
   onApplyGateway: () => Promise<void>;
   onApplyAccount: (accountId: string) => Promise<void>;
 }
@@ -23,27 +25,41 @@ export const CodexIntegrationPage = ({
   gatewayBase,
   modelCatalogPath,
   onMessage,
+  onSaveSettings,
   onApplyGateway,
   onApplyAccount
 }: CodexIntegrationPageProps) => {
   const [mode, setMode] = useState<AuthMode>(normalizeAuthMode(settings.codex_auth_mode));
   const [accountId, setAccountId] = useState(settings.codex_auth_mode === "account" ? settings.codex_selected_account_id || "" : "");
+  const [gatewayConfigMode, setGatewayConfigMode] = useState<GatewayConfigMode>(gatewayConfigModeFromSettings(settings));
   const [busy, setBusy] = useState(false);
   const usableAccounts = useMemo(() => accounts.filter((account) => isUsableAccount(account, settings)), [accounts, settings]);
   const selectedAccount = accounts.find((account) => account.id === accountId);
   const alreadyApplied = mode === "gateway"
     ? settings.codex_auth_mode === "gateway"
     : mode === "account" && settings.codex_auth_mode === "account" && settings.codex_selected_account_id === accountId;
+  const gatewayConfigChanged = gatewayConfigMode !== gatewayConfigModeFromSettings(settings);
+  const previewSettings = {
+    ...settings,
+    codex_config_use_openai_base_url: gatewayConfigMode === "base_url" ? "true" : "false"
+  };
+  const applyButtonText = mode === "gateway"
+    ? alreadyApplied && !gatewayConfigChanged ? "重新应用到 Codex" : "应用到 Codex"
+    : alreadyApplied ? "已应用" : "应用到 Codex";
 
   useEffect(() => {
     setMode(normalizeAuthMode(settings.codex_auth_mode));
     setAccountId(settings.codex_auth_mode === "account" ? settings.codex_selected_account_id || "" : "");
+    setGatewayConfigMode(gatewayConfigModeFromSettings(settings));
   }, [settings]);
 
   const apply = async (): Promise<void> => {
     setBusy(true);
     try {
-      if (mode === "gateway") await onApplyGateway();
+      if (mode === "gateway") {
+        if (gatewayConfigChanged) await onSaveSettings(previewSettings);
+        await onApplyGateway();
+      }
       else if (mode === "account") await onApplyAccount(accountId);
     } catch (error) {
       onMessage(`写入失败：${error instanceof Error ? error.message : String(error)}`);
@@ -54,11 +70,7 @@ export const CodexIntegrationPage = ({
 
   return (
     <Card className="v1-page-card" variant="borderless">
-      <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
-        <div>
-          <Typography.Title level={4}>接入模式</Typography.Title>
-          <Typography.Text type="secondary">选择 Codex 使用本地网关，或直接使用一个订阅账号。</Typography.Text>
-        </div>
+      <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
         {settings.codex_auth_mode && <Tag color="success" icon={<CheckCircleOutlined />}>当前：{settings.codex_auth_mode === "gateway" ? "网关模式" : "账号模式"}</Tag>}
       </Flex>
 
@@ -81,9 +93,23 @@ export const CodexIntegrationPage = ({
             title="推荐模式"
             description="Codex 将使用已配置的订阅账号和模型渠道，并根据所选模型发送请求。"
           />
+          <Card size="small" title="配置写入方式">
+            <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+              <Typography.Text type="secondary">决定应用网关模式时写入 config.toml 的连接配置。</Typography.Text>
+              <Segmented
+                block
+                value={gatewayConfigMode}
+                onChange={(value) => setGatewayConfigMode(value as GatewayConfigMode)}
+                options={[
+                  { label: "Base URL（推荐）", value: "base_url" },
+                  { label: "自定义 Provider", value: "provider" }
+                ]}
+              />
+            </Space>
+          </Card>
           <div className="v1-auth-preview-grid">
             <CodePreview title="auth.json" value={JSON.stringify({ OPENAI_API_KEY: maskedGatewayKey(settings) }, null, 2)} />
-            <CodePreview title="config.toml" value={providerToml(settings, gatewayBase, modelCatalogPath)} />
+            <CodePreview title="config.toml" value={providerToml(previewSettings, gatewayBase, modelCatalogPath)} />
           </div>
         </Space>
       )}
@@ -119,7 +145,7 @@ export const CodexIntegrationPage = ({
           disabled={!mode || (mode === "account" && (alreadyApplied || !accountId || !isUsableAccount(selectedAccount, settings)))}
           onClick={apply}
         >
-          {alreadyApplied && mode === "gateway" ? "重新应用到 Codex" : alreadyApplied ? "已应用" : "应用到 Codex"}
+          {applyButtonText}
         </Button>
       </Flex>
     </Card>
@@ -136,6 +162,10 @@ const CodePreview = ({ title, value }: { title: string; value: string }) => (
 
 const normalizeAuthMode = (value: unknown): AuthMode => (
   value === "gateway" || value === "account" ? value : ""
+);
+
+const gatewayConfigModeFromSettings = (settings: Settings): GatewayConfigMode => (
+  settings.codex_config_use_openai_base_url === "false" ? "provider" : "base_url"
 );
 
 const maskedGatewayKey = (settings: Settings): string => settings.gateway_api_key_configured === "true"

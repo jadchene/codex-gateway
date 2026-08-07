@@ -21,10 +21,10 @@ import {
   Typography
 } from "antd";
 import type { TableColumnsType } from "antd";
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
-import type { RequestLog, RequestLogPage, TokenSummary } from "../../../shared/contracts/logs";
+import type { RequestLog, RequestLogPage, TokenAccountSummary, TokenSummary, TokenTotals } from "../../../shared/contracts/logs";
 import type { Settings } from "../../../shared/contracts/settings";
 import {
   cacheHitRate,
@@ -66,6 +66,7 @@ export const RequestAnalyticsPage = ({
 }: RequestAnalyticsPageProps) => {
   const [filters, setFilters] = useState<LogFilterValues>(todayLogFilters);
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null);
+  const [accountPoolExpanded, setAccountPoolExpanded] = useState(false);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => [...DEFAULT_ANALYTICS_COLUMN_KEYS]);
   const upstreamQuery = useQuery({
     queryKey: ["upstreams", "analytics"],
@@ -74,6 +75,7 @@ export const RequestAnalyticsPage = ({
 
   const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters): Promise<void> => {
     setFilters(nextFilters);
+    setAccountPoolExpanded(false);
     await onQuery(toLogQuery(nextFilters, page, pageSize));
   };
 
@@ -93,6 +95,10 @@ export const RequestAnalyticsPage = ({
   };
 
   const currency = settings.billing_currency || "USD";
+  const accountUsage = summary.byAccount.filter((item) => Boolean(item.account_id));
+  const upstreamUsage = summary.byAccount.filter((item) => !item.account_id);
+  const accountPoolUsage = sumTokenUsage(accountUsage);
+  const breakdownTotal = upstreamUsage.reduce((total, item) => total + Number(item.total_tokens || 0), Number(accountPoolUsage.total_tokens || 0));
   const allColumns: TableColumnsType<RequestLog> = [
     { key: "time", title: "时间", dataIndex: "created_at", width: 160, render: (value) => formatTime(value) },
     {
@@ -155,11 +161,7 @@ export const RequestAnalyticsPage = ({
 
   return (
     <section className="v1-page-card v1-page-fill v1-analytics-page">
-        <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
-          <div>
-            <Typography.Title level={4}>调用分析</Typography.Title>
-            <Typography.Text type="secondary">按渠道、模型和账号查看调用量、Token、耗时与费用。</Typography.Text>
-          </div>
+        <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
           <Dropdown
             trigger={["click"]}
             popupRender={() => (
@@ -230,45 +232,73 @@ export const RequestAnalyticsPage = ({
           <Button icon={<ReloadOutlined />} onClick={resetFilters}>重置</Button>
         </Flex>
 
-        <div className="v1-metric-grid">
-          <Card size="small"><Statistic title="调用" value={summary.total.calls || 0} /></Card>
+        <div className="v1-analytics-summary">
+          <div className="v1-analytics-metric"><Statistic title="调用" value={summary.total.calls || 0} /></div>
           <TokenUsageTooltip usage={summary.total}>
-            <Card size="small"><Statistic title="总 Token" value={summary.total.total_tokens || 0} /></Card>
+            <div className="v1-analytics-metric"><Statistic title="总 Token" value={summary.total.total_tokens || 0} /></div>
           </TokenUsageTooltip>
-          <Card size="small"><Statistic title="缓存命中" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} suffix="%" /></Card>
-          <Card size="small"><Statistic title="平均耗时" value={summary.total.average_duration_ms || 0} precision={0} suffix="ms" /></Card>
-          <Card size="small"><Statistic title="错误" value={summary.total.errors || 0} /></Card>
-          <Card size="small"><Statistic title={`估算成本（${currency}）`} value={summary.total.estimated_cost || 0} precision={4} /></Card>
+          <div className="v1-analytics-metric"><Statistic title="缓存命中" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} suffix="%" /></div>
+          <div className="v1-analytics-metric"><Statistic title="平均耗时" value={summary.total.average_duration_ms || 0} precision={0} suffix="ms" /></div>
+          <div className={Number(summary.total.errors || 0) > 0 ? "v1-analytics-metric error" : "v1-analytics-metric"}><Statistic title="错误" value={summary.total.errors || 0} /></div>
+          <div className="v1-analytics-metric"><Statistic title={`估算成本（${currency}）`} value={summary.total.estimated_cost || 0} precision={4} /></div>
         </div>
 
-        {summary.byAccount.length > 0 && (
-          <div className="v1-breakdown-grid">
-            {summary.byAccount.map((item) => {
-              const isAccount = Boolean(item.account_id);
-              const key = isAccount ? `account:${item.account_id}` : `upstream:${item.upstream_id || "unknown"}`;
-              const active = isAccount
-                ? filters.accountId === item.account_id
-                : filters.upstreamId === item.upstream_id;
-              const title = isAccount
-                ? item.account_name || item.account_id
-                : item.upstream_name || item.upstream_id || "未识别渠道";
-              const nextFilters = isAccount
-                ? { ...filters, accountId: active ? "" : item.account_id || "", upstreamId: "" }
-                : { ...filters, accountId: "", upstreamId: active ? "" : item.upstream_id || "" };
-              return <TokenUsageTooltip usage={item} key={key}>
-                <Card
-                  hoverable={Boolean(item.account_id || item.upstream_id)}
-                  size="small"
-                  className={active ? "v1-summary-card active" : "v1-summary-card"}
-                  onClick={() => (item.account_id || item.upstream_id) && runQuery(1, pageData.pageSize, nextFilters)}
-                >
-                  <Statistic title={title} value={item.total_tokens || 0} formatter={(value) => formatTokenNumber(Number(value || 0))} suffix="Token" />
-                </Card>
-              </TokenUsageTooltip>;
-            })}
+        {breakdownTotal > 0 && (
+          <div className="v1-usage-section">
+            <Typography.Text strong>Token 用量</Typography.Text>
+            <div className="v1-usage-viewport">
+              <div className="v1-usage-track">
+                {upstreamUsage.map((item) => (
+                  <TokenUsageTooltip usage={item} key={`upstream:${item.upstream_id || item.upstream_name || "unknown"}`}>
+                    <div className="v1-usage-segment" style={usageShareStyle(item.total_tokens, breakdownTotal)}>
+                      <UsageSegmentContent
+                        name={item.upstream_name || item.upstream_id || "未识别渠道"}
+                        tokens={item.total_tokens}
+                        percent={usagePercent(item.total_tokens, breakdownTotal)}
+                      />
+                    </div>
+                  </TokenUsageTooltip>
+                ))}
+                {accountUsage.length > 0 && (
+                  <div className="v1-usage-pool" style={usageShareStyle(accountPoolUsage.total_tokens, breakdownTotal)}>
+                    {!accountPoolExpanded ? (
+                      <TokenUsageTooltip usage={accountPoolUsage}>
+                        <button className="v1-usage-pool-summary" aria-label="展开 GPT 账号池" onClick={() => setAccountPoolExpanded(true)}>
+                          <UsageSegmentContent
+                            name="GPT 账号池"
+                            tokens={accountPoolUsage.total_tokens}
+                            percent={usagePercent(accountPoolUsage.total_tokens, breakdownTotal)}
+                          />
+                        </button>
+                      </TokenUsageTooltip>
+                    ) : (
+                      <div className="v1-usage-accounts">
+                        {accountUsage.map((item) => (
+                          <TokenUsageTooltip usage={item} key={`account:${item.account_id || item.account_name || "unknown"}`}>
+                            <button
+                              className="v1-usage-account"
+                              style={usageShareStyle(item.total_tokens, Number(accountPoolUsage.total_tokens || 0))}
+                              aria-label={`返回 GPT 账号池：${item.account_name || item.account_id || "未识别账号"}`}
+                              onClick={() => setAccountPoolExpanded(false)}
+                            >
+                              <UsageSegmentContent
+                                name={item.account_name || item.account_id || "未识别账号"}
+                                tokens={item.total_tokens}
+                                percent={usagePercent(item.total_tokens, Number(accountPoolUsage.total_tokens || 0))}
+                              />
+                            </button>
+                          </TokenUsageTooltip>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
+        <Typography.Title level={5} className="v1-analytics-table-title">调用明细</Typography.Title>
         <Table
           rowKey="id"
           columns={columns}
@@ -319,6 +349,49 @@ const TokenUsageTooltip = ({
     {children}
   </Tooltip>
 );
+
+const UsageSegmentContent = ({
+  name,
+  tokens,
+  percent
+}: {
+  name: string;
+  tokens: number | undefined;
+  percent: number;
+}) => (
+  <>
+    <span className="v1-usage-name">{name}</span>
+    <span className="v1-usage-data">
+      <span>{formatTokenNumber(tokens)} Token</span>
+      <span className="v1-usage-percent">{percent.toFixed(1)}%</span>
+    </span>
+  </>
+);
+
+const usagePercent = (value: number | undefined, total: number): number => (
+  total > 0 ? Number(value || 0) / total * 100 : 0
+);
+
+const usageShareStyle = (value: number | undefined, total: number): CSSProperties => ({
+  "--v1-usage-share": `${usagePercent(value, total)}%`
+} as CSSProperties);
+
+const sumTokenUsage = (items: TokenAccountSummary[]): TokenTotals => {
+  const fields: Array<keyof TokenTotals> = [
+    "calls",
+    "errors",
+    "estimated_cost",
+    "input_tokens",
+    "cached_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+    "total_tokens"
+  ];
+  return Object.fromEntries(fields.map((field) => [
+    field,
+    items.reduce((total, item) => total + Number(item[field] || 0), 0)
+  ])) as TokenTotals;
+};
 
 const requestLogDetails = (log: RequestLog) => {
   const account = [log.account_name, log.account_email]

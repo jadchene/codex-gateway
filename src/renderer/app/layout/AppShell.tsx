@@ -20,6 +20,7 @@ const { Header, Content, Sider } = Layout;
 interface PageDefinition {
   id: string;
   label: string;
+  description?: string;
 }
 
 interface AppShellProps extends PropsWithChildren {
@@ -62,6 +63,10 @@ export const AppShell = ({
   );
   const title = useMemo(
     () => pages.find((page) => page.id === activePage)?.label ?? "Codex Gateway",
+    [activePage, pages]
+  );
+  const description = useMemo(
+    () => pages.find((page) => page.id === activePage)?.description ?? "",
     [activePage, pages]
   );
 
@@ -107,12 +112,13 @@ export const AppShell = ({
                 type="text"
                 onClick={toggleCollapsed}
               />
-              <div>
+              <div className="v1-header-heading">
                 <Typography.Title level={3}>{title}</Typography.Title>
+                {description && <Typography.Text type="secondary" className="v1-header-subtitle">{description}</Typography.Text>}
               </div>
             </Space>
             <Space wrap>
-              <Tag color={gatewayRunning ? "success" : "default"}>Gateway {gatewayRunning ? "运行中" : "已停止"}</Tag>
+              <Tag color={gatewayRunning ? "success" : "default"}>API {gatewayRunning ? "运行中" : "已停止"}</Tag>
               <Tag color={mcpGatewayRunning ? "success" : "default"}>MCP {mcpGatewayRunning ? "运行中" : "已停止"}</Tag>
             </Space>
           </Flex>

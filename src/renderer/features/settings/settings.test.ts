@@ -91,21 +91,6 @@ describe("settings appearance and display units", () => {
     expect(formToSettings(settings, { ...form, gateway_api_key: "replacement" }).gateway_api_key).toBe("replacement");
   });
 
-  it("round-trips the Codex openai_base_url config option and defaults to enabled", () => {
-    const settings = {
-      codex_config_use_openai_base_url: "false",
-      auto_start_gateway: "false",
-      auto_start_mcp_gateway: "false",
-      ignore_five_hour_limit: "false"
-    };
-    const form = settingsToForm(settings);
-    expect(form.codex_config_write_mode).toBe("provider");
-    const saved = formToSettings(settings, { ...form, codex_config_write_mode: "base_url" });
-    expect(saved.codex_config_use_openai_base_url).toBe("true");
-    expect(saved.codex_config_write_mode).toBeUndefined();
-    expect(settingsToForm({}).codex_config_write_mode).toBe("base_url");
-  });
-
   it("round-trips the WebSocket HTTP-only model upgrade rejection toggle", () => {
     const settings = {
       gateway_websocket_reject_http_only_model_upgrade: "true",
@@ -161,14 +146,18 @@ describe("settings appearance and display units", () => {
         onClearAppLogs: vi.fn()
       }));
 
-    expect(screen.getByRole("heading", { name: "设置中心" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "常规" })).toBeTruthy();
-    expect(screen.getByText("忽略 5 小时限制")).toBeTruthy();
+    expect(screen.getByText("应用行为")).toBeTruthy();
+    expect(screen.getByText("外观")).toBeTruthy();
+    expect(screen.queryByText("忽略 5 小时限制")).toBeNull();
     expect(screen.queryByRole("button", { name: "保存设置" })).toBeNull();
-    await user.click(screen.getByRole("menuitem", { name: "网络与限制" }));
+    await user.click(screen.getByRole("menuitem", { name: "账号与额度" }));
+    expect(screen.getByText("忽略 5 小时限制")).toBeTruthy();
+    expect(screen.getByText("账号调度")).toBeTruthy();
+    await user.click(screen.getByRole("menuitem", { name: "高级网络" }));
     expect(screen.getByText("超时与并发")).toBeTruthy();
-    expect(screen.getAllByRole("menuitem")).toHaveLength(8);
-    await user.click(screen.getByRole("menuitem", { name: "外观" }));
+    expect(screen.getAllByRole("menuitem")).toHaveLength(7);
+    await user.click(screen.getByRole("menuitem", { name: "常规" }));
     await user.click(screen.getByText("深色"));
     expect(screen.getByRole("button", { name: /保存设置/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "放弃更改" }));

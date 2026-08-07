@@ -67,27 +67,21 @@ export const ServicesPage = ({
 
   return (
     <div className="v1-page-card">
-      <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
-        <div>
-          <Typography.Title level={4}>服务管理</Typography.Title>
-          <Typography.Text type="secondary">启动、停止或重启本地网关服务。</Typography.Text>
-        </div>
-      </Flex>
       <div className="v1-service-grid">
         <ServiceCard
-          title="Codex Gateway"
+          title="API 服务"
           running={gateway.running}
           loading={busyService === "gateway"}
           onToggle={() => toggle("gateway")}
           onRestart={() => restart("gateway")}
         >
           <Descriptions column={1} size="small" items={[
-            { key: "base", label: "服务地址", children: <CopyableValue value={gatewayBase} onCopy={() => copy("服务地址", gatewayBase)} /> }
+            { key: "base", label: "服务地址", children: <CopyableValue value={gatewayBase} onCopy={() => copy("API 地址", gatewayBase)} /> }
           ]} />
           {gateway.error && <Alert showIcon type="error" title="最近错误" description={gateway.error} />}
         </ServiceCard>
         <ServiceCard
-          title="MCP Gateway"
+          title="MCP 服务"
           running={mcpGateway.running}
           loading={busyService === "mcp"}
           onToggle={() => toggle("mcp")}

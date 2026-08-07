@@ -13,14 +13,14 @@ Codex Gateway is a Windows desktop app for using ChatGPT subscription accounts a
 - Switch between subscription and third-party models from the Codex model picker.
 - View account quotas, channel balances, request usage, latency, and estimated cost.
 - Keep account and channel configuration in a local `data/` directory beside the app.
-- Manage Codex Gateway and an optional MCP Gateway from one interface.
+- Manage the local API service and optional MCP service from one interface.
 
 ## Quick Start
 
 1. Open `Codex Gateway.exe`.
 2. Add a ChatGPT subscription account, a model channel, or both.
-3. Open **Access Mode** and apply Gateway mode.
-4. Start Codex Gateway from **Services**.
+3. Open **Integration Mode** and apply Gateway mode.
+4. Start the API service from **Services**.
 5. Return to Codex and select a model.
 
 Gateway mode makes subscription and third-party models available together. Account mode connects Codex directly to one selected subscription account.
@@ -43,20 +43,21 @@ Each Responses API channel supports the following settings:
 
 You can inspect the imported model catalog and test a channel before using it in Codex.
 
-### Services and MCP Gateway
+The **Integration Mode** page applies either gateway or direct-account mode to Codex. Gateway mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it.
 
-The **Services** page starts and stops Codex Gateway and the optional [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure the MCP Gateway file path and address before starting it.
+### Services
+
+The **Services** page starts, stops, and restarts the local API service and the optional MCP service powered by [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure the MCP service file path and address before starting it.
 
 ### Settings
 
 | Area | Available settings |
 | --- | --- |
-| General | Launch with Windows, window-close behavior, and whether account selection ignores the five-hour quota window. |
-| Appearance | Light, dark, or system theme and comfortable or compact density. |
-| Codex Gateway | Listening address, port, local API key, automatic service start, and Codex connection method. |
-| Accounts and quotas | Refresh interval, refresh timeout, quota cooldown, quota display, and an optional third-party fallback model for auto review. |
+| General | Launch with Windows, window-close behavior, theme, and interface density. |
+| Local gateway | Listening address, port, local API key, and automatic service start. |
+| MCP integration | Automatic start, configuration file path, host, port, and HTTP path. |
+| Accounts and quotas | Refresh interval, refresh timeout, account-selection policy, quota cooldown, quota display, and an optional third-party fallback model for auto review. |
 | Logs and billing | Request-log retention, runtime-log retention, and billing currency. |
-| MCP Gateway | Automatic start, configuration file path, host, port, and HTTP path. |
 | Storage | Current data location and controls for clearing request or runtime logs. |
 | Advanced network | Connection and idle timeouts, request timeout, shutdown grace period, HTTP and WebSocket limits, payload and buffer limits, and automatic HTTP fallback for HTTP-only models. Defaults are suitable for normal use. |
 

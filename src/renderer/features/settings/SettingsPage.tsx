@@ -26,8 +26,6 @@ type SettingsRecord = Record<string, string>;
 interface SettingsPageProps {
   settings: SettingsRecord;
   paths: { dataDir?: string; dbPath?: string };
-  gatewayRunning?: boolean;
-  mcpGatewayRunning?: boolean;
   onSave: (settings: SettingsRecord) => Promise<unknown>;
   onMessage: (message: string) => void;
   onClearTokenLogs: () => Promise<void>;
@@ -50,7 +48,6 @@ type SettingsFormValues = Record<string, unknown> & {
   auto_start_mcp_gateway_enabled: boolean;
   ignore_five_hour_limit_enabled: boolean;
   gateway_websocket_reject_http_only_model_upgrade_enabled: boolean;
-  codex_config_write_mode: "base_url" | "provider";
 };
 
 const SECOND_FIELDS: Record<string, string> = {
@@ -73,8 +70,6 @@ const MIB_FIELDS: Record<string, string> = {
 export const SettingsPage = ({
   settings,
   paths,
-  gatewayRunning = false,
-  mcpGatewayRunning = false,
   onSave,
   onMessage,
   onClearTokenLogs,
@@ -83,13 +78,11 @@ export const SettingsPage = ({
   const [form] = Form.useForm<SettingsFormValues>();
   const [activeSection, setActiveSection] = useState("general");
   const [dirty, setDirty] = useState(false);
-  const [changedFields, setChangedFields] = useState(() => new Set<string>());
   const [autoReviewModelOptions, setAutoReviewModelOptions] = useState<Array<{ value: string; label: string }>>([]);
 
   useEffect(() => {
     form.setFieldsValue(settingsToForm(settings));
     setDirty(false);
-    setChangedFields(new Set());
   }, [form, settings]);
 
   useEffect(() => {
@@ -114,7 +107,6 @@ export const SettingsPage = ({
       await onSave(next);
       applyAppearancePreferences(appearanceFromSettings(next));
       setDirty(false);
-      setChangedFields(new Set());
     } catch {
       applyAppearancePreferences(appearanceFromSettings(settings));
     }
@@ -134,9 +126,8 @@ export const SettingsPage = ({
     }
   };
 
-  const previewAppearance = (changed: Partial<SettingsFormValues>, values: SettingsFormValues): void => {
+  const previewAppearance = (_: Partial<SettingsFormValues>, values: SettingsFormValues): void => {
     setDirty(true);
-    setChangedFields((current) => new Set([...current, ...Object.keys(changed)]));
     applyAppearancePreferences(appearanceFromSettings({
       appearance_theme: values.appearance_theme,
       appearance_density: values.appearance_density
@@ -147,59 +138,49 @@ export const SettingsPage = ({
     form.setFieldsValue(settingsToForm(settings));
     applyAppearancePreferences(appearanceFromSettings(settings));
     setDirty(false);
-    setChangedFields(new Set());
   };
 
   const generalTab = (
-    <SettingsSection title="常规" description="设置应用的启动和关闭方式。">
-      <div className="v1-settings-grid v1-settings-grid-2">
-        <Form.Item name="startup_launch" label="开机自启">
-          <Select options={[
-            { label: "关闭", value: "disabled" },
-            { label: "自动启动", value: "auto" },
-            { label: "延迟启动", value: "delayed" }
-          ]} />
-        </Form.Item>
-        <Form.Item name="close_behavior" label="关闭窗口时">
-          <Select options={[
-            { label: "退出应用", value: "exit" },
-            { label: "最小化到托盘", value: "tray" }
-          ]} />
-        </Form.Item>
-      </div>
-      <Flex align="center" justify="space-between" className="v1-setting-switch-row">
-        <div>
-          <Typography.Text strong>忽略 5 小时限制</Typography.Text>
-          <Typography.Text type="secondary" className="v1-block">账号选择和额度汇总只依据 7 天窗口。</Typography.Text>
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      <SettingsSection title="应用行为" description="设置应用的启动和关闭方式。">
+        <div className="v1-settings-grid v1-settings-grid-2">
+          <Form.Item name="startup_launch" label="开机自启">
+            <Select options={[
+              { label: "关闭", value: "disabled" },
+              { label: "自动启动", value: "auto" },
+              { label: "延迟启动", value: "delayed" }
+            ]} />
+          </Form.Item>
+          <Form.Item name="close_behavior" label="关闭窗口时">
+            <Select options={[
+              { label: "退出应用", value: "exit" },
+              { label: "最小化到托盘", value: "tray" }
+            ]} />
+          </Form.Item>
         </div>
-        <Form.Item name="ignore_five_hour_limit_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
-      </Flex>
-    </SettingsSection>
-  );
-
-  const appearanceTab = (
-    <SettingsSection title="外观" description="选择界面主题和显示密度。">
-      <div className="v1-settings-grid v1-settings-grid-2">
-        <Form.Item name="appearance_theme" label="主题">
-          <Segmented block options={[
-            { label: "跟随系统", value: "system" },
-            { label: "浅色", value: "light" },
-            { label: "深色", value: "dark" }
-          ]} />
-        </Form.Item>
-        <Form.Item name="appearance_density" label="界面密度">
-          <Segmented block options={[
-            { label: "舒适", value: "comfortable" },
-            { label: "紧凑", value: "compact" }
-          ]} />
-        </Form.Item>
-      </div>
-    </SettingsSection>
+      </SettingsSection>
+      <SettingsSection title="外观" description="选择界面主题和显示密度。">
+        <div className="v1-settings-grid v1-settings-grid-2">
+          <Form.Item name="appearance_theme" label="主题">
+            <Segmented block options={[
+              { label: "跟随系统", value: "system" },
+              { label: "浅色", value: "light" },
+              { label: "深色", value: "dark" }
+            ]} />
+          </Form.Item>
+          <Form.Item name="appearance_density" label="界面密度">
+            <Segmented block options={[
+              { label: "舒适", value: "comfortable" },
+              { label: "紧凑", value: "compact" }
+            ]} />
+          </Form.Item>
+        </div>
+      </SettingsSection>
+    </Space>
   );
 
   const gatewayTab = (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <SettingsSection title="本地监听" description="设置 Codex Gateway 的监听地址和访问密钥。">
+    <SettingsSection title="本地监听" description="设置 Codex Gateway 的监听地址和访问密钥。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <Form.Item name="gateway_host" label="监听地址" rules={[{ required: true }]}>
             <Input placeholder="127.0.0.1" />
@@ -242,16 +223,7 @@ export const SettingsPage = ({
           </div>
           <Form.Item name="auto_start_gateway_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
         </Flex>
-      </SettingsSection>
-      <SettingsSection title="Codex 接入" description="选择 Codex 客户端连接本地网关的方式。">
-        <Form.Item name="codex_config_write_mode" label="连接方式" style={{ maxWidth: 260 }}>
-          <Select options={[
-            { label: "Base URL", value: "base_url" },
-            { label: "Provider", value: "provider" }
-          ]} />
-        </Form.Item>
-      </SettingsSection>
-    </Space>
+    </SettingsSection>
   );
 
   const quotaTab = (
@@ -260,8 +232,21 @@ export const SettingsPage = ({
         <div className="v1-settings-grid v1-settings-grid-2">
           <NumberField name="usage_refresh_interval_secs" label="自动刷新间隔" suffix="秒（0 为关闭）" min={0} max={86400} />
           <NumberField name="usage_refresh_timeout_seconds" label="单次刷新超时" suffix="秒" min={1} max={300} />
+        </div>
+      </SettingsSection>
+      <SettingsSection title="账号调度" description="设置账号选择和额度耗尽后的冷却策略。">
+        <div style={{ maxWidth: 320 }}>
           <NumberField name="gateway_quota_cooldown_seconds" label="额度冷却" suffix="秒" min={1} max={3600} />
         </div>
+        <Flex align="center" justify="space-between" className="v1-setting-switch-row">
+          <div>
+            <Typography.Text strong>忽略 5 小时限制</Typography.Text>
+            <Typography.Text type="secondary" className="v1-block">账号选择和额度汇总只依据 7 天窗口。</Typography.Text>
+          </div>
+          <Form.Item name="ignore_five_hour_limit_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
+        </Flex>
+      </SettingsSection>
+      <SettingsSection title="额度展示" description="设置 Codex 客户端看到的订阅账号额度。">
         <Form.Item name="codex_quota_headers_mode" label="Codex 额度显示" extra="仅影响订阅账号；第三方渠道始终显示可用。">
           <Segmented options={[
             { label: "隐藏账号额度", value: "block" },
@@ -395,21 +380,6 @@ export const SettingsPage = ({
       onValuesChange={previewAppearance}
     >
       <Card className="v1-page-card" variant="borderless">
-        <Flex className="v1-page-heading" align="flex-start" justify="space-between" gap={16} wrap>
-          <div>
-            <Typography.Title level={4}>设置中心</Typography.Title>
-            <Typography.Text type="secondary">调整应用、网关、额度、日志和外观设置。</Typography.Text>
-          </div>
-        </Flex>
-        {dirty && (gatewayRunning || mcpGatewayRunning) && [...changedFields].some((key) => !key.startsWith("appearance_") && key !== "navigation_collapsed") && (
-          <Alert
-            showIcon
-            type="warning"
-            title="重启服务后生效"
-            description={`${gatewayRunning ? "Codex Gateway" : ""}${gatewayRunning && mcpGatewayRunning ? "、" : ""}${mcpGatewayRunning ? "MCP Gateway" : ""} 正在运行。保存后请到“服务管理”重启对应服务。`}
-            style={{ marginBottom: 16 }}
-          />
-        )}
         <div className="v1-settings-layout">
           <Menu
             className="v1-settings-menu"
@@ -422,12 +392,11 @@ export const SettingsPage = ({
             {{
               general: generalTab,
               gateway: gatewayTab,
-              network: networkTab,
               quota: quotaTab,
               logs: logsBillingTab,
               mcp: mcpTab,
               storage: dataTab,
-              appearance: appearanceTab
+              network: networkTab
             }[activeSection] ?? generalTab}
           </div>
         </div>
@@ -445,12 +414,11 @@ export const SettingsPage = ({
 const SETTINGS_SECTIONS = [
   { key: "general", label: "常规" },
   { key: "gateway", label: "本地网关" },
-  { key: "network", label: "网络与限制" },
+  { key: "mcp", label: "MCP 集成" },
   { key: "quota", label: "账号与额度" },
   { key: "logs", label: "日志与计费" },
-  { key: "mcp", label: "MCP 集成" },
   { key: "storage", label: "存储与维护" },
-  { key: "appearance", label: "外观" }
+  { key: "network", label: "高级网络" }
 ] as const;
 
 const SettingsSection = ({
@@ -504,14 +472,13 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
   values.auto_start_mcp_gateway_enabled = settings.auto_start_mcp_gateway === "true";
   values.ignore_five_hour_limit_enabled = settings.ignore_five_hour_limit === "true";
   values.gateway_websocket_reject_http_only_model_upgrade_enabled = settings.gateway_websocket_reject_http_only_model_upgrade === "true";
-  values.codex_config_write_mode = settings.codex_config_use_openai_base_url !== "false" ? "base_url" : "provider";
   return values;
 };
 
 export const formToSettings = (current: SettingsRecord, values: Partial<SettingsFormValues>): SettingsRecord => {
   const next: SettingsRecord = { ...current };
   for (const [key, value] of Object.entries(values)) {
-    if (key in SECOND_FIELDS || key in MIB_FIELDS || key.endsWith("_enabled") || key === "codex_config_write_mode") continue;
+    if (key in SECOND_FIELDS || key in MIB_FIELDS || key.endsWith("_enabled")) continue;
     if (key === "gateway_api_key" && !String(value || "").trim()) continue;
     next[key] = String(value ?? "").trim();
   }
@@ -536,9 +503,6 @@ export const formToSettings = (current: SettingsRecord, values: Partial<Settings
   }
   if (Object.prototype.hasOwnProperty.call(values, "gateway_websocket_reject_http_only_model_upgrade_enabled")) {
     next.gateway_websocket_reject_http_only_model_upgrade = values.gateway_websocket_reject_http_only_model_upgrade_enabled ? "true" : "false";
-  }
-  if (Object.prototype.hasOwnProperty.call(values, "codex_config_write_mode")) {
-    next.codex_config_use_openai_base_url = values.codex_config_write_mode === "base_url" ? "true" : "false";
   }
   return next;
 };
