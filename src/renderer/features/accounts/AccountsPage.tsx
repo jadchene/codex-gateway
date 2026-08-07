@@ -151,7 +151,7 @@ export const AccountsPage = ({
       title: "操作",
       key: "actions",
       fixed: "right",
-      width: 92,
+      width: 124,
       render: (_, account) => (
         <Space size={4}>
           <Popconfirm
@@ -160,10 +160,10 @@ export const AccountsPage = ({
             okButtonProps={{ danger: true }}
             onConfirm={() => onDelete(account.id)}
           >
-            <Button aria-label="删除账号" danger icon={<DeleteOutlined />} size="small" />
+            <Button aria-label="删除账号" danger icon={<DeleteOutlined />} />
           </Popconfirm>
           <Dropdown menu={{ items: accountActions(account) ?? [] }} trigger={["click"]}>
-            <Button aria-label="更多账号操作" icon={<MoreOutlined />} size="small" />
+            <Button aria-label="更多账号操作" icon={<MoreOutlined />} />
           </Dropdown>
         </Space>
       )

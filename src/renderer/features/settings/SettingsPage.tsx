@@ -145,14 +145,14 @@ export const SettingsPage = ({
       <SettingsSection title="应用行为" description="设置应用的启动和关闭方式。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <Form.Item name="startup_launch" label="开机自启">
-            <Select options={[
+            <Segmented block options={[
               { label: "关闭", value: "disabled" },
               { label: "自动启动", value: "auto" },
               { label: "延迟启动", value: "delayed" }
             ]} />
           </Form.Item>
           <Form.Item name="close_behavior" label="关闭窗口时">
-            <Select options={[
+            <Segmented block options={[
               { label: "退出应用", value: "exit" },
               { label: "最小化到托盘", value: "tray" }
             ]} />

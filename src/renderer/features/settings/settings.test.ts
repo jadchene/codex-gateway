@@ -149,6 +149,8 @@ describe("settings appearance and display units", () => {
     expect(screen.getByRole("menuitem", { name: "常规" })).toBeTruthy();
     expect(screen.getByText("应用行为")).toBeTruthy();
     expect(screen.getByText("外观")).toBeTruthy();
+    expect(screen.getByText("延迟启动")).toBeTruthy();
+    expect(screen.getByText("最小化到托盘")).toBeTruthy();
     expect(screen.queryByText("忽略 5 小时限制")).toBeNull();
     expect(screen.queryByRole("button", { name: "保存设置" })).toBeNull();
     await user.click(screen.getByRole("menuitem", { name: "账号与额度" }));
