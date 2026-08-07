@@ -21,8 +21,12 @@ test("migrations create a verified backup, model pricing storage, and remove obs
       dataDir: fixture.directory,
       dbPath: fixture.database
     });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 3);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 4);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
+    const compactColumn = store.db.prepare("PRAGMA table_info(upstreams)").all()
+      .find((column) => column.name === "compact_adapt_enabled");
+    assert.equal(compactColumn?.dflt_value, "1");
+    assert.equal(store.db.prepare("SELECT compact_adapt_enabled FROM upstreams").get().compact_adapt_enabled, 1);
     assert.deepEqual(
       { ...store.db.prepare("SELECT id, kind, base_url, supports_websocket FROM upstreams").get() },
       {
@@ -66,7 +70,7 @@ test("current migration upgrades an existing v1 database with its own verified b
   const fixture = createV1Fixture();
   try {
     const store = createStore({ secretCodec: passthroughCodec, dataDir: fixture.directory, dbPath: fixture.database });
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 3);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 4);
     assert.equal(store.db.prepare("PRAGMA table_info(request_logs)").all().some((column) => column.name === "attempt_chain_json"), true);
     store.db.close();
     const backups = backupFiles(fixture.directory);

@@ -47,6 +47,7 @@ interface FormValues {
   apiKey?: string;
   enabled: boolean;
   supportsWebSocket: boolean;
+  compactAdaptEnabled: boolean;
   balanceQueryType: "none" | "deepseek";
   modelCatalogJson: string;
   modelPricing: Record<string, ModelPricing>;
@@ -132,7 +133,7 @@ export const UpstreamsPage = () => {
     setEditing(null);
     form.setFieldsValue({
       name: "", baseUrl: "", apiKey: "", enabled: true, supportsWebSocket: false,
-      balanceQueryType: "none", modelCatalogJson: EMPTY_CATALOG, modelPricing: {},
+      compactAdaptEnabled: true, balanceQueryType: "none", modelCatalogJson: EMPTY_CATALOG, modelPricing: {},
       publicHeadersJson: "{}", secretHeadersJson: "{}"
     });
     setDrawerOpen(true);
@@ -148,6 +149,7 @@ export const UpstreamsPage = () => {
       apiKey: "",
       enabled: upstream.enabled,
       supportsWebSocket: upstream.supportsWebSocket,
+      compactAdaptEnabled: upstream.compactAdaptEnabled,
       balanceQueryType: upstream.balanceQueryType,
       modelCatalogJson: JSON.stringify({
         models: models.filter((model) => model.available).map((model) => ({
@@ -189,6 +191,7 @@ export const UpstreamsPage = () => {
       ...(values.apiKey ? { apiKey: values.apiKey } : {}),
       enabled: values.enabled,
       supportsWebSocket: values.supportsWebSocket,
+      compactAdaptEnabled: values.compactAdaptEnabled,
       balanceQueryType: values.balanceQueryType,
       modelCatalogJson: values.modelCatalogJson,
       modelPricing: Object.fromEntries(catalogModels.map((model) => [model.slug, normalizePrice(values.modelPricing?.[model.slug])])),
@@ -298,6 +301,14 @@ export const UpstreamsPage = () => {
           </Form.Item>
           <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
           <Form.Item name="supportsWebSocket" label="支持 WS" valuePropName="checked"><Switch /></Form.Item>
+          <Form.Item
+            name="compactAdaptEnabled"
+            label="适配远程压缩"
+            valuePropName="checked"
+            tooltip="解决第三方模型可能不支持远程压缩的问题。"
+          >
+            <Switch />
+          </Form.Item>
         </Flex>
 
         <Typography.Title level={5}>Codex 模型 JSON</Typography.Title>

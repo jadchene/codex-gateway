@@ -29,6 +29,8 @@ test("each model owns independent three-rate pricing and exact channel routing",
       }
     });
     assert.equal(saved.hasApiKey, true);
+    assert.equal(saved.compactAdaptEnabled, true);
+    assert.equal(service.findRuntimeByModel("model-a")?.compactAdaptEnabled, true);
     assert.equal("apiKey" in saved, false);
     assert.equal(JSON.stringify(saved).includes(Buffer.from("secret").toString("base64")), false);
     assert.equal(service.listModels(saved.id)[0]?.metadata.prefer_websockets, false);
@@ -43,6 +45,7 @@ test("each model owns independent three-rate pricing and exact channel routing",
     const updated = service.save({
       ...input("Example API Updated", "model-a"),
       id: saved.id,
+      compactAdaptEnabled: false,
       modelCatalogJson: JSON.stringify({ models: [
         { slug: "model-a", display_name: "Model A Updated", supports_parallel_tool_calls: true },
         { slug: "model-b", display_name: "Model B", supports_parallel_tool_calls: false }
@@ -54,6 +57,8 @@ test("each model owns independent three-rate pricing and exact channel routing",
     });
     assert.equal(updated.id, saved.id);
     assert.equal(updated.name, "Example API Updated");
+    assert.equal(updated.compactAdaptEnabled, false);
+    assert.equal(service.findRuntimeByModel("model-a")?.compactAdaptEnabled, false);
     assert.equal(service.list().filter((upstream) => upstream.kind === "responses_api").length, 1);
   } finally { fixture.close(); }
 });

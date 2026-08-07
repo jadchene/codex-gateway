@@ -442,6 +442,44 @@ test("Responses WebSocket immediately requests HTTP fallback when the first mode
   }
 });
 
+test("WebSocket upgrade is rejected with 426 when the configured Codex model only supports HTTP", async () => {
+  let harness;
+  let upstreamUpgrades = 0;
+  harness = await startHarness({
+    hooks: {
+      ...externalApiHooks(() => harness, false),
+      readCurrentCodexModel: () => "deepseek-chat"
+    },
+    onUpgrade() {
+      upstreamUpgrades += 1;
+    }
+  }, { gateway_websocket_reject_http_only_model_upgrade: "true" });
+  try {
+    const response = await connectFailure(harness, "/v1/responses", { "session-id": "upgrade-426" });
+    assert.equal(response.statusCode, 426);
+    assert.equal(upstreamUpgrades, 0);
+    assert.equal(harness.appLogs.some((entry) => entry.status === "WEBSOCKET_NOT_SUPPORTED"), true);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("WebSocket upgrade proceeds when the configured Codex model is unknown or supports WebSocket", async () => {
+  const harness = await startHarness({
+    hooks: {
+      readCurrentCodexModel: () => "not-in-catalog"
+    }
+  }, { gateway_websocket_reject_http_only_model_upgrade: "true" });
+  try {
+    const { websocket, response } = await connectGateway(harness, "/v1/responses", { "session-id": "upgrade-ok" });
+    assert.equal(response.statusCode, 101);
+    websocket.close();
+    await nextClose(websocket);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("Responses WebSocket does not replay a request after an upstream error on an established connection", async () => {
   let harness;
   const attempts = [];
@@ -883,7 +921,10 @@ async function startHarness(options, settingOverrides = {}) {
     addTokenLog: (entry) => tokenLogs.push(entry),
     addAppLog: (entry) => appLogs.push(entry)
   };
-  const gateway = createGateway(store, null, options.hooks || {});
+  const gateway = createGateway(store, null, {
+    readCurrentCodexModel: () => "",
+    ...(options.hooks || {})
+  });
   await gateway.start();
   return {
     gateway,

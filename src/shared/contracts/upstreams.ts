@@ -46,6 +46,7 @@ export interface UpstreamSummary {
   hasApiKey: boolean;
   apiKeyFingerprint: string | null;
   supportsWebSocket: boolean;
+  compactAdaptEnabled: boolean;
   publicHeaders: Record<string, string>;
   secretHeaders: SecretHeaderSummary[];
   balanceQueryType: BalanceQueryType;
@@ -65,6 +66,7 @@ export interface SaveResponsesApiUpstreamInput {
   apiKey?: string;
   enabled: boolean;
   supportsWebSocket: boolean;
+  compactAdaptEnabled: boolean;
   balanceQueryType: BalanceQueryType;
   publicHeaders?: Record<string, string>;
   secretHeaders?: Record<string, string>;

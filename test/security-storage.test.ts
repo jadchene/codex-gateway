@@ -515,7 +515,7 @@ test("non-loopback gateway listeners require a strong key", () => {
   assert.equal(isStrongGatewayApiKey(`sk-${"a".repeat(32)}`), true);
 });
 
-test("usage refresh is single-flight, concurrency-bounded, and timestamps only complete success", async () => {
+test("usage refresh is single-flight, concurrency-bounded, and stamps passes with at least one success", async () => {
   const accounts = Array.from({ length: 5 }, (_, index) => ({ id: String(index), name: `A${index}`, enabled: true, access_token: "token" }));
   const settingsWrites = [];
   let active = 0;
@@ -546,7 +546,91 @@ test("usage refresh is single-flight, concurrency-bounded, and timestamps only c
   failId = "2";
   const failed = await coordinator.refreshAll("failure");
   assert.equal(failed.find((item) => item.id === "2").ok, false);
-  assert.equal(settingsWrites.length, 1);
+  assert.equal(settingsWrites.length, 2);
+});
+
+test("usage refresh also refreshes API channel balances and skips channels without balance config", async () => {
+  const accounts = [{ id: "a1", name: "Account A", enabled: true, access_token: "token" }];
+  const balanceUpstreams = [
+    { id: "u1", name: "DeepSeek API", balanceQueryType: "deepseek" },
+    { id: "u2", name: "No Balance API", balanceQueryType: "none" }
+  ];
+  const refreshed = [];
+  const entries = [];
+  const coordinator = createUsageRefreshCoordinator({
+    listAccounts: () => accounts,
+    async refreshAccount(id) {
+      refreshed.push(`account:${id}`);
+    },
+    listBalanceUpstreams: () => balanceUpstreams.filter((upstream) => upstream.balanceQueryType !== "none"),
+    async refreshBalance(id) {
+      refreshed.push(`balance:${id}`);
+    },
+    saveSettings: (patch) => entries.push({ type: "settings", patch }),
+    addLog: (entry) => entries.push({ type: "log", entry }),
+    compactError: String,
+    now: () => 124000,
+    concurrency: 2
+  });
+  const results = await coordinator.refreshAll("timer");
+  assert.equal(refreshed.join(","), "account:a1,balance:u1");
+  assert.equal(results.length, 2);
+  assert.deepEqual(results.map((item) => [item.kind, item.id, item.ok]), [
+    ["account", "a1", true],
+    ["balance", "u1", true]
+  ]);
+  const refreshLog = entries.find((item) => item.type === "log" && item.entry.action === "refresh-all");
+  assert.match(refreshLog.entry.message, /账号额度 1\/1/);
+  assert.match(refreshLog.entry.message, /渠道余额 1\/1/);
+  assert.deepEqual(entries.find((item) => item.type === "settings"), {
+    type: "settings",
+    patch: { last_usage_refresh_all_at: 124 }
+  });
+});
+
+test("a failed channel balance refresh reports partial but does not block other targets or the pass timestamp", async () => {
+  const settingsWrites = [];
+  const coordinator = createUsageRefreshCoordinator({
+    listAccounts: () => [{ id: "a1", name: "Account A", enabled: true, access_token: "token" }],
+    async refreshAccount() {
+      return undefined;
+    },
+    listBalanceUpstreams: () => [{ id: "u1", name: "DeepSeek API" }],
+    async refreshBalance() {
+      throw new Error("balance failed");
+    },
+    saveSettings: (patch) => settingsWrites.push(patch),
+    addLog: () => {},
+    compactError: String,
+    now: () => 125000,
+    concurrency: 2
+  });
+  const results = await coordinator.refreshAll("timer");
+  assert.equal(results.filter((item) => item.ok).length, 1);
+  assert.equal(results.find((item) => item.kind === "balance").ok, false);
+  assert.deepEqual(settingsWrites, [{ last_usage_refresh_all_at: 125 }]);
+});
+
+test("a fully failed refresh pass does not stamp the pass timestamp", async () => {
+  const settingsWrites = [];
+  const coordinator = createUsageRefreshCoordinator({
+    listAccounts: () => [{ id: "a1", name: "Account A", enabled: true, access_token: "token" }],
+    async refreshAccount() {
+      throw new Error("account failed");
+    },
+    listBalanceUpstreams: () => [{ id: "u1", name: "DeepSeek API" }],
+    async refreshBalance() {
+      throw new Error("balance failed");
+    },
+    saveSettings: (patch) => settingsWrites.push(patch),
+    addLog: () => {},
+    compactError: String,
+    now: () => 126000,
+    concurrency: 2
+  });
+  const results = await coordinator.refreshAll("timer");
+  assert.equal(results.every((item) => item.ok === false), true);
+  assert.equal(settingsWrites.length, 0);
 });
 
 function testSecretCodec() {

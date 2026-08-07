@@ -49,6 +49,7 @@ type SettingsFormValues = Record<string, unknown> & {
   auto_start_gateway_enabled: boolean;
   auto_start_mcp_gateway_enabled: boolean;
   ignore_five_hour_limit_enabled: boolean;
+  gateway_websocket_reject_http_only_model_upgrade_enabled: boolean;
   codex_config_write_mode: "base_url" | "provider";
 };
 
@@ -316,15 +317,24 @@ export const SettingsPage = ({
           key: "timeouts",
           label: "超时与并发",
           children: (
-            <div className="v1-settings-grid v1-settings-grid-3">
-              <NumberField name="gateway_connect_timeout_seconds" label="连接超时" suffix="秒" min={1} max={600} />
-              <NumberField name="gateway_stream_idle_timeout_seconds" label="SSE 空闲超时" suffix="秒" min={1} max={3600} />
-              <NumberField name="gateway_unary_timeout_seconds" label="普通请求总超时" suffix="秒" min={1} max={3600} />
-              <NumberField name="gateway_websocket_idle_timeout_seconds" label="WS 响应空闲超时" suffix="秒" min={1} max={3600} />
-              <NumberField name="gateway_shutdown_grace_seconds" label="停机宽限" suffix="秒" min={0.1} max={60} />
-              <NumberField name="gateway_max_concurrent_requests" label="HTTP 最大并发" min={1} max={10000} />
-              <NumberField name="gateway_websocket_max_connections" label="WS 最大连接" min={1} max={10000} />
-            </div>
+            <>
+              <div className="v1-settings-grid v1-settings-grid-3">
+                <NumberField name="gateway_connect_timeout_seconds" label="连接超时" suffix="秒" min={1} max={600} />
+                <NumberField name="gateway_stream_idle_timeout_seconds" label="SSE 空闲超时" suffix="秒" min={1} max={3600} />
+                <NumberField name="gateway_unary_timeout_seconds" label="普通请求总超时" suffix="秒" min={1} max={3600} />
+                <NumberField name="gateway_websocket_idle_timeout_seconds" label="WS 响应空闲超时" suffix="秒" min={1} max={3600} />
+                <NumberField name="gateway_shutdown_grace_seconds" label="停机宽限" suffix="秒" min={0.1} max={60} />
+                <NumberField name="gateway_max_concurrent_requests" label="HTTP 最大并发" min={1} max={10000} />
+                <NumberField name="gateway_websocket_max_connections" label="WS 最大连接" min={1} max={10000} />
+              </div>
+              <Flex align="center" justify="space-between" className="v1-setting-switch-row">
+                <div>
+                  <Typography.Text strong>WS 握手拒绝 HTTP-only 模型</Typography.Text>
+                  <Typography.Text type="secondary" className="v1-block">Codex 配置的当前模型仅支持 HTTP 时，新建 WebSocket 连接直接返回 426，让客户端立即改用 HTTP。</Typography.Text>
+                </div>
+                <Form.Item name="gateway_websocket_reject_http_only_model_upgrade_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
+              </Flex>
+            </>
           )
         },
         {
@@ -460,6 +470,7 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
   values.auto_start_gateway_enabled = settings.auto_start_gateway === "true";
   values.auto_start_mcp_gateway_enabled = settings.auto_start_mcp_gateway === "true";
   values.ignore_five_hour_limit_enabled = settings.ignore_five_hour_limit === "true";
+  values.gateway_websocket_reject_http_only_model_upgrade_enabled = settings.gateway_websocket_reject_http_only_model_upgrade === "true";
   values.codex_config_write_mode = settings.codex_config_use_openai_base_url !== "false" ? "base_url" : "provider";
   return values;
 };
@@ -489,6 +500,9 @@ export const formToSettings = (current: SettingsRecord, values: Partial<Settings
   }
   if (Object.prototype.hasOwnProperty.call(values, "ignore_five_hour_limit_enabled")) {
     next.ignore_five_hour_limit = values.ignore_five_hour_limit_enabled ? "true" : "false";
+  }
+  if (Object.prototype.hasOwnProperty.call(values, "gateway_websocket_reject_http_only_model_upgrade_enabled")) {
+    next.gateway_websocket_reject_http_only_model_upgrade = values.gateway_websocket_reject_http_only_model_upgrade_enabled ? "true" : "false";
   }
   if (Object.prototype.hasOwnProperty.call(values, "codex_config_write_mode")) {
     next.codex_config_use_openai_base_url = values.codex_config_write_mode === "base_url" ? "true" : "false";

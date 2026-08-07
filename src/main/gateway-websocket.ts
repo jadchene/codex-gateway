@@ -102,6 +102,27 @@ function createGatewayWebSocketGateway(options: Dynamic) {
       return rejectUpgrade(socket, 409, "The gateway cannot safely route this existing turn state.");
     }
     if (parsedUrl.pathname === "/v1/responses") {
+      const clientModel = settings.gateway_websocket_reject_http_only_model_upgrade === "true"
+        ? String(helpers.readCurrentCodexModel?.() || "").trim()
+        : "";
+      if (clientModel) {
+        const upstream = hooks.upstreamService?.findRuntimeByModel?.(clientModel);
+        if (upstream && !upstream.supportsWebSocket) {
+          store.addAppLog?.({
+            level: "warn",
+            scope: "gateway-websocket",
+            action: "reject",
+            status: "WEBSOCKET_NOT_SUPPORTED",
+            message: `[${connectionId}] ${parsedUrl.pathname} 握手阶段已拒绝：Codex 当前模型 ${clientModel} 仅支持 HTTP 传输（426）。`
+          });
+          return rejectUpgrade(
+            socket,
+            426,
+            `The model ${clientModel} configured in Codex supports HTTP transport only.`,
+            "WEBSOCKET_NOT_SUPPORTED"
+          );
+        }
+      }
       return handleDeferredResponsesUpgrade({
         server,
         request,
@@ -880,9 +901,11 @@ function logTargetFailure(store: Dynamic, parsedUrl: Dynamic, result: Dynamic, c
   });
 }
 
-function rejectUpgrade(socket: Dynamic, status: Dynamic, message: Dynamic) {
+function rejectUpgrade(socket: Dynamic, status: Dynamic, message: Dynamic, code: Dynamic = "") {
   if (socket.destroyed) return;
-  const body = JSON.stringify({ error: { message } });
+  const error: Record<string, string> = { message: String(message) };
+  if (code) error.code = String(code);
+  const body = JSON.stringify({ error });
   const reason = statusReason(status);
   socket.end([
     `HTTP/1.1 ${status} ${reason}`,

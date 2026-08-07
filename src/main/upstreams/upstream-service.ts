@@ -31,6 +31,7 @@ export interface RuntimeUpstream {
   baseUrl: string;
   apiKey: string;
   supportsWebSocket: boolean;
+  compactAdaptEnabled: boolean;
   requestHeaders: Record<string, string>;
   credentialRef: string;
 }
@@ -206,6 +207,7 @@ function runtimeFromRow(row: SqlRow, secretCodec: SecretCodec): RuntimeUpstream 
     baseUrl: String(row.base_url || ""),
     apiKey: row.api_key_encrypted ? secretCodec.decrypt(String(row.api_key_encrypted)) : "",
     supportsWebSocket: Boolean(row.supports_websocket),
+    compactAdaptEnabled: booleanOrDefault(row.compact_adapt_enabled, true),
     requestHeaders: {
       ...normalizeStoredHeaderMap(stored.requestHeaders),
       ...decryptSecretHeaders(secretCodec, row.custom_headers_encrypted_json)
@@ -246,22 +248,23 @@ function saveUpstream(db: DatabaseSync, secretCodec: SecretCodec, raw: SaveRespo
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(`
-      INSERT INTO upstreams (
-        id, name, kind, enabled, base_url, auth_type, api_key_encrypted,
-        custom_headers_encrypted_json, model_discovery_mode, models_endpoint,
-        supports_http, supports_websocket, capabilities_json, cost_factors_json,
-        balance_query_type, created_at, updated_at
-      ) VALUES (?, ?, 'responses_api', ?, ?, 'bearer', ?, ?, 'disabled', NULL, 1, ?, ?, '{}', ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name, enabled = excluded.enabled, base_url = excluded.base_url,
-        api_key_encrypted = excluded.api_key_encrypted,
-        custom_headers_encrypted_json = excluded.custom_headers_encrypted_json,
-        supports_http = 1, supports_websocket = excluded.supports_websocket,
-        capabilities_json = excluded.capabilities_json,
-        balance_query_type = excluded.balance_query_type, updated_at = excluded.updated_at
+    INSERT INTO upstreams (
+      id, name, kind, enabled, base_url, auth_type, api_key_encrypted,
+      custom_headers_encrypted_json, model_discovery_mode, models_endpoint,
+      supports_http, supports_websocket, compact_adapt_enabled, capabilities_json, cost_factors_json,
+      balance_query_type, created_at, updated_at
+    ) VALUES (?, ?, 'responses_api', ?, ?, 'bearer', ?, ?, 'disabled', NULL, 1, ?, ?, ?, '{}', ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name, enabled = excluded.enabled, base_url = excluded.base_url,
+      api_key_encrypted = excluded.api_key_encrypted,
+      custom_headers_encrypted_json = excluded.custom_headers_encrypted_json,
+      supports_http = 1, supports_websocket = excluded.supports_websocket,
+      compact_adapt_enabled = excluded.compact_adapt_enabled,
+      capabilities_json = excluded.capabilities_json,
+      balance_query_type = excluded.balance_query_type, updated_at = excluded.updated_at
     `).run(
       id, input.name, input.enabled ? 1 : 0, input.baseUrl, encryptedApiKey,
-      encryptedSecretHeaders, input.supportsWebSocket ? 1 : 0, stateJson,
+      encryptedSecretHeaders, input.supportsWebSocket ? 1 : 0, input.compactAdaptEnabled ? 1 : 0, stateJson,
       input.balanceQueryType, Number(existing?.created_at || timestamp), timestamp
     );
     db.prepare("DELETE FROM upstream_models WHERE upstream_id = ?").run(id);
@@ -433,6 +436,7 @@ function publicUpstream(db: DatabaseSync, row: SqlRow, secretCodec: SecretCodec)
     hasApiKey: Boolean(encryptedKey),
     apiKeyFingerprint: encryptedKey ? createHash("sha256").update(encryptedKey).digest("hex").slice(0, 10) : null,
     supportsWebSocket: Boolean(row.supports_websocket),
+    compactAdaptEnabled: booleanOrDefault(row.compact_adapt_enabled, true),
     publicHeaders: normalizeStoredHeaderMap(state.requestHeaders),
     secretHeaders: secretHeaderSummary(decryptSecretHeaders(secretCodec, row.custom_headers_encrypted_json)),
     balanceQueryType: builtin ? "none" : balanceQueryType(row.balance_query_type),
@@ -540,6 +544,7 @@ function normalizeInput(input: SaveResponsesApiUpstreamInput) {
     baseUrl: normalizeHttpUrl(input.baseUrl, "上游 Base URL"),
     apiKey: String(input.apiKey || "").trim(), enabled: input.enabled !== false,
     supportsWebSocket: Boolean(input.supportsWebSocket),
+    compactAdaptEnabled: input.compactAdaptEnabled !== false,
     balanceQueryType: balanceQueryType(input.balanceQueryType),
     publicHeaders: normalizeHeaderMap(input.publicHeaders, "公开请求头"),
     secretHeaders: input.secretHeaders === undefined ? undefined : normalizeHeaderMap(input.secretHeaders, "机密请求头"),
@@ -699,6 +704,11 @@ function finiteNumberOrNull(value: unknown): number | null {
 function numberOrNull(value: unknown): number | null {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function booleanOrDefault(value: unknown, fallback: boolean): boolean {
+  if (value === undefined || value === null) return fallback;
+  return Boolean(value);
 }
 
 function upstreamError(code: string, message: string): Error & { code: string } {

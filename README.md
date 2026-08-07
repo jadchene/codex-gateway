@@ -33,6 +33,8 @@ You can sign in through the browser or import the account currently used by Code
 
 Accounts can be enabled, disabled, refreshed, or removed. Automatic quota refresh is configured under **Settings > Accounts and Quotas**.
 
+Scheduled refresh also updates the balance of API channels that have a balance query configured; channels without one are skipped automatically.
+
 ## Model Channels
 
 Each third-party channel requires:
@@ -40,6 +42,7 @@ Each third-party channel requires:
 - A name, API address, and API key.
 - The channel's Codex `models.json` content.
 - Whether the channel supports Responses WebSocket.
+- Whether remote compaction adaptation is enabled (enabled by default).
 - Optional custom headers, balance lookup, and per-model prices.
 
 Model IDs must be unique across all channels. Codex uses the selected model ID to choose its channel.
@@ -47,6 +50,10 @@ Model IDs must be unique across all channels. Codex uses the selected model ID t
 The model JSON also tells Codex which tools, MCP features, input types, and reasoning levels the model supports. Use the metadata supplied by the model provider.
 
 If a channel does not support WebSocket, leave **Supports WS** disabled. Codex requests for that channel will use HTTP.
+
+**Remote compaction adaptation** solves the issue of third-party models that may not support remote compaction. Channels with native compaction support can turn this switch off.
+
+By default, when the model currently selected in Codex only supports HTTP, the gateway returns 426 while the new WebSocket connection is being created so Codex falls back to HTTP immediately instead of waiting for the first request. You can disable this under **Settings > Network** with **Reject HTTP-only models on WebSocket handshake**.
 
 ## MCP Gateway
 

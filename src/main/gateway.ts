@@ -4,8 +4,10 @@ import http from "node:http";
 import { pickGatewayAccount } from "./selection.ts";
 import { createGatewayRouting } from "./gateway-routing.ts";
 import { createGatewayWebSocketGateway } from "./gateway-websocket.ts";
+import { readCurrentCodexModel } from "./codex-cli-auth.ts";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
 import { extractTokenUsage, createSseUsageParser, emptyUsage } from "./gateway/usage-parser.ts";
+import { adaptCompactionStream, isCompactionTriggerRequest } from "./gateway/compaction-adapter.ts";
 import {
   syncAccountUsageFromHeaders,
   buildCodexQuotaHeaders,
@@ -89,6 +91,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
         buildCodexQuotaSnapshot,
         buildExternalQuotaSnapshot,
         syncAccountUsageFromHeaders,
+        readCurrentCodexModel: hooks.readCurrentCodexModel || readCurrentCodexModel,
         isQuotaExhaustedResponse,
         isAuthExpiredResponse,
         extractTokenUsage
@@ -258,6 +261,10 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
     accountForLog = account;
     targetForLog = target;
     const actualUpstreamUrl = result.upstreamUrl || request.upstreamUrl;
+    const compactAdaptEnabled = target?.kind === "responses_api"
+      && target?.compactAdaptEnabled === true
+      && pathname === "/v1/responses"
+      && isCompactionTriggerRequest(incomingBody);
 
     if (response.status >= 200 && response.status < 300) {
       if (target?.kind !== "responses_api") {
@@ -269,26 +276,37 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
       let completedResponseForwarded = false;
       if (response.body) {
         const reader = response.body.getReader();
-        const idleTimeoutMs = isStreamingResponsesPath(pathname)
-          ? positiveSetting(settings.gateway_stream_idle_timeout_ms, DEFAULT_STREAM_IDLE_TIMEOUT_MS)
-          : 0;
-        let stopIdleTimeout = scheduleAbort(lifecycle.controller, idleTimeoutMs, "stream_idle_timeout", "Upstream response stream became idle.");
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            stopIdleTimeout();
-            stopIdleTimeout = scheduleAbort(lifecycle.controller, idleTimeoutMs, "stream_idle_timeout", "Upstream response stream became idle.");
-            usageParser.feed(value);
-            await writeResponseChunk(res, value, lifecycle.signal);
-            if (usageParser.responseCompleted()) completedResponseForwarded = true;
+        if (compactAdaptEnabled) {
+          try {
+            await forwardAdaptedCompactionStream({ reader, res, signal: lifecycle.signal, usageParser });
+          } catch (error) {
+            if (!(usageParser.responseCompleted() && cancellationKind(error, lifecycle.signal) === "client_cancelled")) throw error;
+            await reader.cancel("client closed after response.completed").catch(() => {});
+          } finally {
+            if (!res.writableEnded && !res.destroyed) res.end();
           }
-        } catch (error) {
-          if (!(completedResponseForwarded && cancellationKind(error, lifecycle.signal) === "client_cancelled")) throw error;
-          await reader.cancel("client closed after response.completed").catch(() => {});
-        } finally {
-          stopIdleTimeout();
-          if (!res.writableEnded && !res.destroyed) res.end();
+        } else {
+          const idleTimeoutMs = isStreamingResponsesPath(pathname)
+            ? positiveSetting(settings.gateway_stream_idle_timeout_ms, DEFAULT_STREAM_IDLE_TIMEOUT_MS)
+            : 0;
+          let stopIdleTimeout = scheduleAbort(lifecycle.controller, idleTimeoutMs, "stream_idle_timeout", "Upstream response stream became idle.");
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              stopIdleTimeout();
+              stopIdleTimeout = scheduleAbort(lifecycle.controller, idleTimeoutMs, "stream_idle_timeout", "Upstream response stream became idle.");
+              usageParser.feed(value);
+              await writeResponseChunk(res, value, lifecycle.signal);
+              if (usageParser.responseCompleted()) completedResponseForwarded = true;
+            }
+          } catch (error) {
+            if (!(completedResponseForwarded && cancellationKind(error, lifecycle.signal) === "client_cancelled")) throw error;
+            await reader.cancel("client closed after response.completed").catch(() => {});
+          } finally {
+            stopIdleTimeout();
+            if (!res.writableEnded && !res.destroyed) res.end();
+          }
         }
       } else {
         res.end();
@@ -500,6 +518,25 @@ function buildApiUpstreamHeaders(headers: Dynamic, upstream: Dynamic, hasBody: D
   if (!upstream.apiKey) deleteHeader(outgoing, "authorization");
   stripSubscriptionHeaders(outgoing);
   return outgoing;
+}
+
+async function forwardAdaptedCompactionStream(options: Dynamic) {
+  const { reader, res, signal, usageParser } = options;
+  const chunks: Buffer[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    usageParser.feed(value);
+    chunks.push(Buffer.from(value));
+  }
+  const original = Buffer.concat(chunks).toString("utf8");
+  const adapted = adaptCompactionStream(original);
+  if (!res.writableEnded && !res.destroyed) {
+    if (!signal.aborted) {
+      res.write(adapted.adapted ? adapted.text : original);
+    }
+    res.end();
+  }
 }
 
 function deleteHeader(headers: Dynamic, name: Dynamic) {

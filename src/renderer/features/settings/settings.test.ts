@@ -106,6 +106,22 @@ describe("settings appearance and display units", () => {
     expect(settingsToForm({}).codex_config_write_mode).toBe("base_url");
   });
 
+  it("round-trips the WebSocket HTTP-only model upgrade rejection toggle", () => {
+    const settings = {
+      gateway_websocket_reject_http_only_model_upgrade: "true",
+      auto_start_gateway: "false",
+      auto_start_mcp_gateway: "false",
+      ignore_five_hour_limit: "false"
+    };
+    const form = settingsToForm(settings);
+    expect(form.gateway_websocket_reject_http_only_model_upgrade_enabled).toBe(true);
+    const saved = formToSettings(settings, {
+      ...form,
+      gateway_websocket_reject_http_only_model_upgrade_enabled: false
+    });
+    expect(saved.gateway_websocket_reject_http_only_model_upgrade).toBe("false");
+  });
+
   it("preserves unmounted setting sections instead of converting missing fields to zero", () => {
     const current = {
       gateway_connect_timeout_ms: "30000",

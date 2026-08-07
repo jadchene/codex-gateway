@@ -145,9 +145,14 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }
   store.runMaintenance();
   scheduleMaintenance();
+  upstreamService = createUpstreamService({ db: store.db, secretCodec });
   usageRefreshCoordinator = createUsageRefreshCoordinator({
     listAccounts: () => store.listAccounts(),
     refreshAccount: refreshUsage,
+    listBalanceUpstreams: () => upstreamService.list().filter(
+      (upstream: Dynamic) => upstream.kind === "responses_api" && upstream.enabled && upstream.balanceQueryType !== "none"
+    ),
+    refreshBalance: (upstreamId: Dynamic) => upstreamService.refreshBalance(upstreamId),
     saveSettings: (patch: Dynamic) => store.saveSettings(patch),
     addLog: (entry: Dynamic) => store.addAppLog(entry),
     compactError,
@@ -158,7 +163,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   await waitForStartupDelay();
   if (runtimeProfile.allowLiveCodexAccess || runtimeProfile.paths?.codexDir) syncDetectedCodexAuthMode();
   authService = createAuthService(store, () => gateway.start(), refreshUsage);
-  upstreamService = createUpstreamService({ db: store.db, secretCodec });
   modelCatalogService = createCodexModelCatalogService({ db: store.db, dataDir: store.paths.dataDir });
   try {
     modelCatalogService.refreshBundled(true);
@@ -917,7 +921,7 @@ function scheduleUsageRefresh(reason: Dynamic = "settings-save") {
       scope: "usage",
       action: "timer-stop",
       status: reason,
-      message: `停止账号额度定时刷新任务：${reason}`
+      message: `停止账号额度与渠道余额定时刷新任务：${reason}`
     });
   }
   const settings = store.getSettings();
@@ -927,7 +931,7 @@ function scheduleUsageRefresh(reason: Dynamic = "settings-save") {
       scope: "usage",
       action: "timer-disabled",
       status: reason,
-      message: `账号额度定时刷新任务未启动：间隔为 ${settings.usage_refresh_interval_secs || 0}`
+      message: `账号额度与渠道余额定时刷新任务未启动：间隔为 ${settings.usage_refresh_interval_secs || 0}`
     });
     return;
   }
@@ -947,7 +951,7 @@ function scheduleUsageRefresh(reason: Dynamic = "settings-save") {
     scope: "usage",
     action: "timer-start",
     status: reason,
-    message: `启动账号额度定时刷新任务：每 ${effectiveIntervalSecs} 秒`
+    message: `启动账号额度与渠道余额定时刷新任务：每 ${effectiveIntervalSecs} 秒`
   });
 }
 
@@ -991,7 +995,7 @@ async function checkUsageRefreshOnStartup() {
       scope: "usage",
       action: "startup-refresh-check",
       status: "fresh",
-      message: `启动时账号额度无需补刷：上次刷新全部额度时间 ${formatTime(lastRefreshAt)}`
+      message: `启动时账号额度与渠道余额无需补刷：上次刷新全部额度时间 ${formatTime(lastRefreshAt)}`
     });
     return false;
   }

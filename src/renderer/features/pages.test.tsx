@@ -233,6 +233,7 @@ const createUpstream = (id: string, name: string, kind: UpstreamKind): UpstreamS
   hasApiKey: kind === "responses_api",
   apiKeyFingerprint: null,
   supportsWebSocket: true,
+  compactAdaptEnabled: true,
   publicHeaders: {},
   secretHeaders: [],
   balanceQueryType: "none",

@@ -11,7 +11,7 @@ type Db = any;
 type Row = Record<string, any>;
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-const LATEST_SCHEMA_VERSION = 3;
+const LATEST_SCHEMA_VERSION = 4;
 
 interface MigrationHooks {
   beforeMigrationCommit?: (context: { db: Db; version: number }) => void;
@@ -70,6 +70,7 @@ export function createStore(options: StoreOptions = {}): Store {
     migrateV1(db, options.migrationHooks);
     migrateV2(db, options.migrationHooks);
     migrateV3(db, options.migrationHooks);
+    migrateV4(db, options.migrationHooks);
     migrateSecrets(db, secretCodec);
   } catch (error) {
     db.close();
@@ -207,6 +208,7 @@ function migrate(db: Db): void {
     gateway_websocket_max_payload_bytes: "134217728",
     gateway_websocket_buffer_high_water_bytes: "4194304",
     gateway_websocket_idle_timeout_ms: "120000",
+    gateway_websocket_reject_http_only_model_upgrade: "true",
     gateway_quota_cooldown_ms: "60000",
     usage_refresh_interval_secs: "900",
     usage_refresh_timeout_ms: "20000",
@@ -362,6 +364,21 @@ function migrateV3(db: Db, hooks: MigrationHooks = {}): void {
     hooks.beforeMigrationCommit?.({ db, version: 3 });
     db.prepare("INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(3, now());
     db.exec("PRAGMA user_version = 3");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function migrateV4(db: Db, hooks: MigrationHooks = {}): void {
+  if (schemaVersion(db) >= 4) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    addColumnIfMissing(db, "upstreams", "compact_adapt_enabled", "INTEGER NOT NULL DEFAULT 1");
+    hooks.beforeMigrationCommit?.({ db, version: 4 });
+    db.prepare("INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(4, now());
+    db.exec("PRAGMA user_version = 4");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

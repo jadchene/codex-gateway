@@ -9,13 +9,21 @@ interface RefreshAccount {
 interface RefreshResult {
   id: string;
   label: string;
+  kind?: "account" | "balance";
   ok: boolean;
   message?: string;
+}
+
+interface BalanceRefreshTarget {
+  id: string;
+  name?: string;
 }
 
 interface RefreshCoordinatorOptions {
   listAccounts: () => RefreshAccount[];
   refreshAccount: (id: string) => Promise<unknown>;
+  listBalanceUpstreams?: () => BalanceRefreshTarget[];
+  refreshBalance?: (id: string) => Promise<unknown>;
   saveSettings: (patch: Record<string, unknown>) => unknown;
   addLog: (entry: Record<string, unknown>) => unknown;
   compactError: (value: unknown) => string;
@@ -38,26 +46,51 @@ export function createUsageRefreshCoordinator(options: RefreshCoordinatorOptions
 
   const perform = async (reason: string): Promise<RefreshResult[]> => {
     const accounts = options.listAccounts().filter((account) => account.enabled && account.access_token);
-    const results = await mapWithConcurrency(accounts, options.concurrency || 3, async (account) => {
+    const balanceUpstreams = options.listBalanceUpstreams ? options.listBalanceUpstreams() : [];
+    const targets: Array<{ kind: "account" | "balance"; id: string; label: string }> = [
+      ...accounts.map((account) => ({
+        kind: "account" as const,
+        id: account.id,
+        label: account.email || account.name || account.id
+      })),
+      ...balanceUpstreams.map((upstream) => ({
+        kind: "balance" as const,
+        id: upstream.id,
+        label: upstream.name || upstream.id
+      }))
+    ];
+    const results = await mapWithConcurrency(targets, options.concurrency || 3, async (target) => {
       try {
-        await options.refreshAccount(account.id);
-        return { id: account.id, label: account.email || account.name || account.id, ok: true };
+        if (target.kind === "account") {
+          await options.refreshAccount(target.id);
+        } else {
+          await options.refreshBalance!(target.id);
+        }
+        return { id: target.id, label: target.label, kind: target.kind, ok: true };
       } catch (error) {
-        return { id: account.id, label: account.email || account.name || account.id, ok: false, message: errorMessage(error) };
+        return { id: target.id, label: target.label, kind: target.kind, ok: false, message: errorMessage(error) };
       }
     });
     const okCount = results.filter((item) => item.ok).length;
+    const accountOk = results.filter((item) => item.kind === "account" && item.ok).length;
+    const accountTotal = results.filter((item) => item.kind === "account").length;
+    const balanceOk = results.filter((item) => item.kind === "balance" && item.ok).length;
+    const balanceTotal = results.filter((item) => item.kind === "balance").length;
     const failed = results.filter((item) => !item.ok);
     const detail = failed.length > 0
       ? `；失败：${failed.map((item) => `${item.label}: ${options.compactError(item.message)}`).join(" | ")}`
       : "";
+    const summaryParts = [];
+    if (accountTotal > 0) summaryParts.push(`账号额度 ${accountOk}/${accountTotal}`);
+    if (balanceTotal > 0) summaryParts.push(`渠道余额 ${balanceOk}/${balanceTotal}`);
+    const summary = summaryParts.length > 0 ? summaryParts.join("，") : "无待刷新项";
     options.addLog({
       scope: "usage",
       action: "refresh-all",
       status: failed.length === 0 && results.length > 0 ? "success" : failed.length < results.length ? "partial" : "failed",
-      message: `${reason}: ${okCount}/${results.length} refreshed${detail}`
+      message: `${reason}: ${summary}${detail}`
     });
-    if (results.length > 0 && failed.length === 0) {
+    if (results.length > 0 && okCount > 0) {
       options.saveSettings({ last_usage_refresh_all_at: Math.floor(options.now() / 1000) });
     }
     return results;

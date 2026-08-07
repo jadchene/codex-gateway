@@ -31,6 +31,36 @@ function managedModelCatalogPath(options: CodexPathOptions = {}): string {
   return path.resolve(options.modelCatalogPath || path.join(codexDir(options), "models.json"));
 }
 
+const codexModelCache = new Map<string, { mtimeMs: number; size: number; model: string }>();
+
+/**
+ * 读取 ~/.codex/config.toml 顶层当前模型（不读取 profiles 子表）。
+ * 供网关在 WebSocket 握手阶段判断当前模型是否支持 WS，依据文件 mtime/size 做轻量缓存。
+ */
+export function readCurrentCodexModel(options: CodexPathOptions = {}): string {
+  const file = configPath(options);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return "";
+  }
+  const cached = codexModelCache.get(file);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.model;
+  let model = "";
+  try {
+    const text = readText(file);
+    const firstSection = text.search(/(?:^|\n)\s*\[/);
+    const header = firstSection === -1 ? text : text.slice(0, firstSection);
+    const match = /(?:^|\n)\s*model\s*=\s*("([^"]*)"|'([^']*)')/.exec(header);
+    if (match) model = String(match[2] ?? match[3] ?? "").trim();
+  } catch {
+    model = "";
+  }
+  codexModelCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, model });
+  return model;
+}
+
 export function applyGatewayMode(settings: Settings, options: CodexPathOptions = {}) {
   ensureCodexDir(options);
   const apiKey = String(settings.gateway_api_key || "").trim();

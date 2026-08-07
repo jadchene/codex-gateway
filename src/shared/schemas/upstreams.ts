@@ -19,6 +19,7 @@ export const saveResponsesApiUpstreamSchema = z.object({
   apiKey: z.string().trim().min(1).optional(),
   enabled: z.boolean(),
   supportsWebSocket: z.boolean(),
+  compactAdaptEnabled: z.boolean().optional(),
   balanceQueryType: z.enum(["none", "deepseek"]),
   publicHeaders: headerMap.optional(),
   secretHeaders: headerMap.optional(),

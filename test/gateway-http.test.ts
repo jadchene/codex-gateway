@@ -620,6 +620,130 @@ test("HTTP gateway routes an external model directly to its owning API channel",
   }
 });
 
+test("HTTP gateway wraps compaction responses for API channels with the adaptation switch enabled", async () => {
+  const apiRequests = [];
+  const apiUpstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    apiRequests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end([
+      'data: {"type":"response.created","response":{"id":"resp-compact"}}',
+      "",
+      'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Summarized history."}]}}',
+      "",
+      'data: {"type":"response.completed","response":{"id":"resp-compact","usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}}}',
+      ""
+    ].join("\n"));
+  });
+  await listen(apiUpstream);
+  const apiPort = apiUpstream.address().port;
+  const hooks = {
+    upstreamService: {
+      findRuntimeByModel(model) {
+        return model === "deepseek-model" ? {
+          id: "api-owner",
+          name: "API Owner",
+          kind: "responses_api",
+          enabled: true,
+          baseUrl: `http://127.0.0.1:${apiPort}/v1`,
+          apiKey: "provider-key",
+          supportsWebSocket: false,
+          compactAdaptEnabled: true,
+          requestHeaders: {},
+          credentialRef: "provider-fingerprint"
+        } : null;
+      },
+      getModelPricing() {
+        return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 1 };
+      },
+      recordRequestOutcome() {}
+    }
+  };
+  const harness = await startHarness((_req, res) => {
+    res.writeHead(500);
+    res.end();
+  }, {}, hooks);
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("compact-adapt", "turn-1"),
+      body: JSON.stringify({
+        model: "deepseek-model",
+        input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }, { type: "compaction_trigger" }]
+      })
+    });
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    assert.equal(apiRequests[0].input.some((item) => item.type === "compaction_trigger"), true);
+    const events = body.split(/\n{2,}/).filter(Boolean).map((block) => JSON.parse(block.replace(/^data:\s*/, "")));
+    const compactionDones = events.filter((event) => event.type === "response.output_item.done" && event.item?.type === "compaction");
+    assert.equal(compactionDones.length, 1);
+    assert.equal(compactionDones[0].item.encrypted_content, "Summarized history.");
+    assert.ok(events.findIndex((event) => event.type === "response.output_item.done" && event.item?.type === "compaction")
+      < events.findIndex((event) => event.type === "response.completed"));
+    assert.equal(harness.tokenLogs.at(-1).total_tokens, 14);
+    assert.equal(harness.tokenLogs.at(-1).upstream_id, "api-owner");
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
+test("HTTP gateway passes compaction responses through unchanged when the adaptation switch is disabled", async () => {
+  const upstreamText = [
+    'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Plain reply"}]}}',
+    "",
+    'data: {"type":"response.completed","response":{"id":"resp-plain"}}',
+    ""
+  ].join("\n");
+  const apiUpstream = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(upstreamText);
+  });
+  await listen(apiUpstream);
+  const apiPort = apiUpstream.address().port;
+  const hooks = {
+    upstreamService: {
+      findRuntimeByModel() {
+        return {
+          id: "api-owner",
+          name: "API Owner",
+          kind: "responses_api",
+          enabled: true,
+          baseUrl: `http://127.0.0.1:${apiPort}/v1`,
+          apiKey: "provider-key",
+          supportsWebSocket: false,
+          compactAdaptEnabled: false,
+          requestHeaders: {},
+          credentialRef: "provider-fingerprint"
+        };
+      },
+      getModelPricing() {
+        return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 1 };
+      },
+      recordRequestOutcome() {}
+    }
+  };
+  const harness = await startHarness((_req, res) => {
+    res.writeHead(500);
+    res.end();
+  }, {}, hooks);
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("compact-plain", "turn-1"),
+      body: JSON.stringify({
+        model: "deepseek-model",
+        input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }, { type: "compaction_trigger" }]
+      })
+    });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), upstreamText);
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
 test("HTTP gateway estimates built-in subscription model cost from its configured model rate", async () => {
   const hooks = {
     upstreamService: {
