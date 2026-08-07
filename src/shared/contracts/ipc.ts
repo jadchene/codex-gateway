@@ -10,6 +10,7 @@ import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "./logs"
 import type { ServiceStatus, Settings } from "./settings";
 import type {
   BalanceRefreshResult,
+  GatewayModelSummary,
   ModelPricing,
   SaveResponsesApiUpstreamInput,
   UpstreamHealthResult,
@@ -34,6 +35,7 @@ export type IpcContract = {
   "accounts:list": IpcSpec<[], PublicAccount[]>;
   "upstreams:list": IpcSpec<[], UpstreamSummary[]>;
   "upstreams:models": IpcSpec<[upstreamId: string], UpstreamModel[]>;
+  "upstreams:gatewayModels": IpcSpec<[], GatewayModelSummary[]>;
   "upstreams:save": IpcSpec<[input: SaveResponsesApiUpstreamInput], UpstreamSummary>;
   "upstreams:delete": IpcSpec<[upstreamId: string], { deleted: boolean; id: string }>;
   "upstreams:refreshBalance": IpcSpec<[upstreamId: string], BalanceRefreshResult>;

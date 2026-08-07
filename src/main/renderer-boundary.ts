@@ -15,6 +15,7 @@ const EDITABLE_SETTING_KEYS = new Set([
   "mcp_gateway_config_path", "mcp_gateway_host", "mcp_gateway_port", "mcp_gateway_path",
   "startup_launch", "close_behavior", "codex_quota_headers_mode",
   "ignore_five_hour_limit", "codex_config_use_openai_base_url",
+  "auto_review_upstream_model",
   "billing_currency", "request_log_retention_days", "app_log_retention_days",
   "appearance_theme", "appearance_density", "navigation_collapsed"
 ]);

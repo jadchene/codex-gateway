@@ -84,12 +84,29 @@ export const SettingsPage = ({
   const [activeSection, setActiveSection] = useState("general");
   const [dirty, setDirty] = useState(false);
   const [changedFields, setChangedFields] = useState(() => new Set<string>());
+  const [autoReviewModelOptions, setAutoReviewModelOptions] = useState<Array<{ value: string; label: string }>>([]);
 
   useEffect(() => {
     form.setFieldsValue(settingsToForm(settings));
     setDirty(false);
     setChangedFields(new Set());
   }, [form, settings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.codexGateway?.listGatewayModels?.()
+      .then((models) => {
+        if (cancelled) return;
+        setAutoReviewModelOptions(models.map((item) => ({
+          value: item.modelId,
+          label: `${item.displayName}（${item.upstreamName}）`
+        })));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const save = async (values: SettingsFormValues): Promise<void> => {
     const next = formToSettings(settings, values);
@@ -250,6 +267,22 @@ export const SettingsPage = ({
             { label: "隐藏账号额度", value: "block" },
             { label: "显示账号池汇总", value: "rewrite" }
           ]} />
+        </Form.Item>
+      </SettingsSection>
+      <SettingsSection title="自动审查回退" description="账号池无可用额度时，自动审查改用指定的第三方模型。">
+        <Form.Item
+          name="auto_review_upstream_model"
+          label="自动审查模型"
+          extra="留空则不启用回退。"
+          style={{ maxWidth: 260 }}
+        >
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择第三方模型"
+            options={autoReviewModelOptions}
+          />
         </Form.Item>
       </SettingsSection>
     </Space>

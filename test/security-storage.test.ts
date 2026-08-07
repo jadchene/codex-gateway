@@ -231,6 +231,9 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
   assert.throws(() => editableSettingsPatch({ appearance_theme: "midnight" }), /取值无效/);
   assert.deepEqual(editableSettingsPatch({ codex_config_use_openai_base_url: "false" }), { codex_config_use_openai_base_url: "false" });
   assert.throws(() => editableSettingsPatch({ codex_config_use_openai_base_url: "maybe" }), /取值无效/);
+  assert.deepEqual(editableSettingsPatch({ auto_review_upstream_model: "deepseek-model" }), {
+    auto_review_upstream_model: "deepseek-model"
+  });
   assert.throws(() => editableSettingsPatch({ gateway_port: "70000" }), /超出范围/);
   assert.throws(() => editableSettingsPatch({ upstream_base_url: "file:///secret" }), /HTTP/);
   assert.deepEqual(editableSettingsPatch({

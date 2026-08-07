@@ -85,6 +85,13 @@ export interface UpstreamModel {
   lastSyncedAt: number | null;
 }
 
+export interface GatewayModelSummary {
+  modelId: string;
+  displayName: string;
+  upstreamId: string;
+  upstreamName: string;
+}
+
 export interface ModelCatalogSaveResult {
   upstreamId: string;
   count: number;

@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   BalanceQueryType,
   BalanceRefreshResult,
+  GatewayModelSummary,
   ModelPricing,
   SaveResponsesApiUpstreamInput,
   UpstreamHealthResult,
@@ -56,6 +57,7 @@ export function createUpstreamService(options: {
     list: () => listUpstreams(db, secretCodec),
     listModels: (upstreamId: string) => listModels(db, upstreamId),
     listGatewayModels: () => listGatewayModels(db),
+    listGatewayModelOptions: () => listGatewayModelOptions(db),
     getRuntime: (upstreamId: string) => runtimeUpstream(db, secretCodec, upstreamId),
     findRuntimeByModel: (modelId: string) => findRuntimeByModel(db, secretCodec, modelId),
     getModelPricing: (upstreamId: string, modelId: string) => getModelPricing(db, upstreamId, modelId),
@@ -119,6 +121,25 @@ function listGatewayModels(db: DatabaseSync) {
       object: "model",
       display_name: String(value.display_name || value.model_id || ""),
       owned_by: String(value.upstream_name || value.upstream_id || "")
+    };
+  });
+}
+
+function listGatewayModelOptions(db: DatabaseSync): GatewayModelSummary[] {
+  return db.prepare(`
+    SELECT upstream_models.model_id, upstream_models.display_name,
+      upstreams.id AS upstream_id, upstreams.name AS upstream_name
+    FROM upstream_models JOIN upstreams ON upstreams.id = upstream_models.upstream_id
+    WHERE upstream_models.available = 1 AND upstreams.enabled = 1
+      AND upstreams.kind = 'responses_api'
+    ORDER BY upstream_models.model_id COLLATE NOCASE
+  `).all().map((row) => {
+    const value = row as SqlRow;
+    return {
+      modelId: String(value.model_id || ""),
+      displayName: String(value.display_name || value.model_id || ""),
+      upstreamId: String(value.upstream_id || ""),
+      upstreamName: String(value.upstream_name || value.upstream_id || "")
     };
   });
 }

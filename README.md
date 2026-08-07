@@ -55,6 +55,8 @@ If a channel does not support WebSocket, leave **Supports WS** disabled. Codex r
 
 **Remote compaction adaptation** solves the issue of third-party models that may not support remote compaction. Channels with native compaction support can turn this switch off.
 
+Codex auto review always sends the fixed `codex-auto-review` model ID. Under **Settings > Accounts and Quotas**, you can select a third-party channel model for it: when the subscription account pool has no usable quota, the gateway routes the auto review request to that channel model. Leave it empty to fail the request when the pool is unavailable.
+
 By default, when the model currently selected in Codex only supports HTTP, the gateway returns 426 while the new WebSocket connection is being created so Codex falls back to HTTP immediately instead of waiting for the first request. You can disable this under **Settings > Network** with **Reject HTTP-only models on WebSocket handshake**.
 
 ## MCP Gateway

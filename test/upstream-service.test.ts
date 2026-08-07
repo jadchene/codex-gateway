@@ -72,6 +72,25 @@ test("model IDs are globally unique across channels", () => {
   } finally { fixture.close(); }
 });
 
+test("gateway model options exclude the subscription pool and keep only third-party channel models", () => {
+  const fixture = createFixture();
+  try {
+    const service = createUpstreamService({ db: fixture.store.db, secretCodec: codec });
+    const saved = service.save(input("API A", "model-a"));
+    const builtin = service.list().find((upstream) => upstream.kind === "chatgpt_subscription_pool");
+    assert.ok(builtin);
+    fixture.store.db.prepare(`
+      INSERT INTO upstream_models (
+        upstream_id, model_id, display_name, available, source,
+        capabilities_json, raw_metadata_json, last_seen_at, last_synced_at
+      ) VALUES (?, ?, ?, 1, 'test', '{}', '{}', ?, ?)
+    `).run(builtin.id, "gpt-pool-model", "GPT Pool Model", Date.now(), Date.now());
+    const options = service.listGatewayModelOptions();
+    assert.deepEqual(options.map((item) => item.modelId), ["model-a"]);
+    assert.equal(options[0]?.upstreamId, saved.id);
+  } finally { fixture.close(); }
+});
+
 test("subscription pool exposes total quota and respects the ignored five-hour window", () => {
   const fixture = createFixture();
   try {

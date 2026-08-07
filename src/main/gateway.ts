@@ -53,6 +53,7 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_UNARY_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_SHUTDOWN_GRACE_MS = 2 * 1000;
 const DEFAULT_QUOTA_COOLDOWN_MS = 60 * 1000;
+const AUTO_REVIEW_MODEL_ID = "codex-auto-review";
 
 function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}) {
   let server: Dynamic = null;
@@ -241,12 +242,15 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
       accountForLog = account;
     };
     const selectedModel = String(parseResponsesPayload(incomingBody)?.model || "");
-    const apiUpstream = selectedModel ? hooks.upstreamService?.findRuntimeByModel?.(selectedModel) : null;
-    const result = apiUpstream
-      ? await callDirectApiTarget({ req, request, incomingBody, settings, hooks, signal: lifecycle.signal, upstream: apiUpstream, modelId: selectedModel })
-      : await callSubscriptionTarget({
+    const isAutoReviewModel = selectedModel === AUTO_REVIEW_MODEL_ID;
+    const apiUpstream = !isAutoReviewModel && selectedModel
+      ? hooks.upstreamService?.findRuntimeByModel?.(selectedModel)
+      : null;
+    const result = isAutoReviewModel
+      ? await callAutoReviewTarget({
         req,
         request,
+        incomingBody,
         settings,
         store,
         hooks,
@@ -254,7 +258,20 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         routeContext,
         signal: lifecycle.signal,
         onAccountSelected
-      });
+      })
+      : apiUpstream
+        ? await callDirectApiTarget({ req, request, incomingBody, settings, hooks, signal: lifecycle.signal, upstream: apiUpstream, modelId: selectedModel })
+        : await callSubscriptionTarget({
+          req,
+          request,
+          settings,
+          store,
+          hooks,
+          runtime,
+          routeContext,
+          signal: lifecycle.signal,
+          onAccountSelected
+        });
     disposeUpstream = result.dispose || (() => {});
     routeResultForLog = result;
     const { account, target, response, body, tokenUsage: errorUsage } = result;
@@ -434,6 +451,39 @@ async function callSubscriptionTarget(options: Dynamic) {
   };
 }
 
+async function callAutoReviewTarget(options: Dynamic) {
+  try {
+    return await callSubscriptionTarget(options);
+  } catch (error: Dynamic) {
+    if (error?.code !== "SUBSCRIPTION_ACCOUNT_UNAVAILABLE") throw error;
+    const fallbackModel = String(options.settings?.auto_review_upstream_model || "").trim();
+    const fallbackUpstream = fallbackModel
+      ? options.hooks?.upstreamService?.findRuntimeByModel?.(fallbackModel)
+      : null;
+    if (!fallbackModel || !fallbackUpstream || fallbackUpstream.kind !== "responses_api") {
+      throw gatewayRouteError(
+        503,
+        "AUTO_REVIEW_FALLBACK_UNAVAILABLE",
+        "The subscription account pool is unavailable and no usable auto review fallback model is configured."
+      );
+    }
+    options.store?.addAppLog?.({
+      level: "info",
+      scope: "gateway",
+      action: "auto-review-fallback",
+      status: "api-upstream",
+      message: `账号池不可用，Auto Review 请求转由第三方渠道模型 ${fallbackModel} 处理。`
+    });
+    return callDirectApiTarget({
+      ...options,
+      upstream: fallbackUpstream,
+      modelId: fallbackModel,
+      clientModel: AUTO_REVIEW_MODEL_ID,
+      incomingBody: rewriteResponsesModel(options.incomingBody, fallbackModel)
+    });
+  }
+}
+
 function requestForSubscriptionTarget(request: Dynamic, settings: Dynamic, hooks: Dynamic) {
   let baseUrl = settings.upstream_base_url;
   try {
@@ -446,7 +496,7 @@ function requestForSubscriptionTarget(request: Dynamic, settings: Dynamic, hooks
 }
 
 async function callDirectApiTarget(options: Dynamic) {
-  const { req, request, incomingBody, settings, hooks, signal, upstream, modelId } = options;
+  const { req, request, incomingBody, settings, hooks, signal, upstream, modelId, clientModel } = options;
   if (!upstream.enabled) {
     throw gatewayRouteError(409, "MODEL_UPSTREAM_DISABLED", "The API upstream for the selected model is disabled.");
   }
@@ -473,7 +523,7 @@ async function callDirectApiTarget(options: Dynamic) {
       },
       attemptCount: 1,
       attemptChain: [],
-      clientModel: modelId,
+      clientModel: clientModel || modelId,
       upstreamModel: modelId
     };
   } catch (error: Dynamic) {
@@ -551,6 +601,13 @@ function parseResponsesPayload(body: Dynamic) {
   } catch {
     return null;
   }
+}
+
+function rewriteResponsesModel(body: Dynamic, model: string): Dynamic {
+  const parsed = parseResponsesPayload(body);
+  if (!parsed) return body;
+  parsed.model = model;
+  return Buffer.from(JSON.stringify(parsed), "utf8");
 }
 
 function routeLogFields(result: Dynamic = {}) {

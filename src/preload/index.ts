@@ -12,6 +12,7 @@ import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shar
 import type { ServiceStatus, Settings } from "../shared/contracts/settings";
 import type {
   BalanceRefreshResult,
+  GatewayModelSummary,
   ModelPricing,
   SaveResponsesApiUpstreamInput,
   UpstreamHealthResult,
@@ -44,6 +45,7 @@ const api = {
   listAccounts: (): Promise<PublicAccount[]> => invoke("accounts:list"),
   listUpstreams: (): Promise<UpstreamSummary[]> => invoke("upstreams:list"),
   listUpstreamModels: (upstreamId: string): Promise<UpstreamModel[]> => invoke("upstreams:models", upstreamId),
+  listGatewayModels: (): Promise<GatewayModelSummary[]> => invoke("upstreams:gatewayModels"),
   saveUpstream: (input: SaveResponsesApiUpstreamInput): Promise<UpstreamSummary> => invoke("upstreams:save", input),
   deleteUpstream: (upstreamId: string): Promise<{ deleted: boolean; id: string }> => invoke("upstreams:delete", upstreamId),
   refreshUpstreamBalance: (upstreamId: string): Promise<BalanceRefreshResult> => invoke("upstreams:refreshBalance", upstreamId),

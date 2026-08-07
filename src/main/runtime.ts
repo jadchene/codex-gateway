@@ -404,6 +404,7 @@ function registerIpc() {
   handleIpc("accounts:list", () => publicAccounts());
   handleIpc("upstreams:list", () => upstreamService.list());
   handleIpc("upstreams:models", (_event, upstreamId) => upstreamService.listModels(upstreamId));
+  handleIpc("upstreams:gatewayModels", () => upstreamService.listGatewayModelOptions());
   handleIpc("upstreams:save", (_event, input) => {
     const result = upstreamService.save(input);
     modelCatalogService.refresh();

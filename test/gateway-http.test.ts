@@ -620,6 +620,155 @@ test("HTTP gateway routes an external model directly to its owning API channel",
   }
 });
 
+test("HTTP gateway routes codex-auto-review to the configured API model when the account pool is unavailable", async () => {
+  const apiRequests = [];
+  let subscriptionCalls = 0;
+  const apiUpstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    apiRequests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"type":"response.completed","response":{"model":"deepseek-model","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}\n\n');
+  });
+  await listen(apiUpstream);
+  const apiPort = apiUpstream.address().port;
+  const hooks = {
+    upstreamService: {
+      findRuntimeByModel(model) {
+        return model === "deepseek-model" ? {
+          id: "api-owner",
+          name: "API Owner",
+          kind: "responses_api",
+          enabled: true,
+          baseUrl: `http://127.0.0.1:${apiPort}/v1`,
+          apiKey: "provider-key",
+          supportsWebSocket: false,
+          compactAdaptEnabled: false,
+          requestHeaders: {},
+          credentialRef: "provider-fingerprint"
+        } : null;
+      },
+      getModelPricing() {
+        return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 1 };
+      },
+      recordRequestOutcome() {}
+    }
+  };
+  const harness = await startHarness((_req, res) => {
+    subscriptionCalls += 1;
+    res.writeHead(500);
+    res.end();
+  }, { auto_review_upstream_model: "deepseek-model" }, hooks);
+  try {
+    for (const account of harness.accounts) account.quota_7d_used_percent = 100;
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("auto-review-fallback", "turn-1"),
+      body: JSON.stringify({ model: "codex-auto-review", input: "review the diff" })
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(subscriptionCalls, 0);
+    assert.equal(apiRequests.length, 1);
+    assert.equal(apiRequests[0].model, "deepseek-model");
+    assert.equal(apiRequests[0].input, "review the diff");
+    assert.equal(harness.tokenLogs.at(-1).client_model, "codex-auto-review");
+    assert.equal(harness.tokenLogs.at(-1).upstream_model, "deepseek-model");
+    assert.equal(harness.tokenLogs.at(-1).upstream_id, "api-owner");
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
+test("HTTP gateway keeps codex-auto-review on the subscription pool while an account is usable", async () => {
+  const apiRequests = [];
+  const subscriptionBodies = [];
+  const apiUpstream = http.createServer((_req, res) => {
+    res.writeHead(500);
+    res.end();
+  });
+  await listen(apiUpstream);
+  const apiPort = apiUpstream.address().port;
+  const hooks = {
+    upstreamService: {
+      findRuntimeByModel(model) {
+        return model === "deepseek-model" ? {
+          id: "api-owner",
+          name: "API Owner",
+          kind: "responses_api",
+          enabled: true,
+          baseUrl: `http://127.0.0.1:${apiPort}/v1`,
+          apiKey: "provider-key",
+          supportsWebSocket: false,
+          compactAdaptEnabled: false,
+          requestHeaders: {},
+          credentialRef: "provider-fingerprint"
+        } : null;
+      },
+      getModelPricing() {
+        return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 1 };
+      },
+      recordRequestOutcome() {}
+    }
+  };
+  const harness = await startHarness(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    subscriptionBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"type":"response.completed","response":{"model":"codex-auto-review","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}\n\n');
+  }, { auto_review_upstream_model: "deepseek-model" }, hooks);
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("auto-review-pool", "turn-1"),
+      body: JSON.stringify({ model: "codex-auto-review", input: "review the diff" })
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(apiRequests.length, 0);
+    assert.equal(subscriptionBodies.length, 1);
+    assert.equal(subscriptionBodies[0].model, "codex-auto-review");
+    assert.equal(harness.tokenLogs.at(-1).upstream_kind, "chatgpt_subscription_pool");
+    assert.equal(harness.tokenLogs.at(-1).client_model, "codex-auto-review");
+    assert.equal(harness.tokenLogs.at(-1).upstream_model, "codex-auto-review");
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
+test("HTTP gateway rejects codex-auto-review when the pool is unavailable and no fallback model is configured", async () => {
+  let subscriptionCalls = 0;
+  const hooks = {
+    upstreamService: {
+      findRuntimeByModel() {
+        return null;
+      },
+      getModelPricing() {
+        return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 1 };
+      },
+      recordRequestOutcome() {}
+    }
+  };
+  const harness = await startHarness((_req, res) => {
+    subscriptionCalls += 1;
+    res.writeHead(500);
+    res.end();
+  }, {}, hooks);
+  try {
+    for (const account of harness.accounts) account.quota_7d_used_percent = 100;
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("auto-review-unconfigured", "turn-1"),
+      body: JSON.stringify({ model: "codex-auto-review", input: "review the diff" })
+    });
+    assert.equal(response.status, 503);
+    assert.equal(subscriptionCalls, 0);
+    assert.match(harness.appLogs.at(-1).message, /auto review fallback model/);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("HTTP gateway wraps compaction responses for API channels with the adaptation switch enabled", async () => {
   const apiRequests = [];
   const apiUpstream = http.createServer(async (req, res) => {
