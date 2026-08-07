@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
 import { createWebSocketObserver } from "./gateway-websocket-observer.ts";
+import { rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
 import { stripSubscriptionHeaders } from "./gateway/protocol.ts";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 30 * 1000;
@@ -207,7 +208,10 @@ function createGatewayWebSocketGateway(options: Dynamic) {
         upstream,
         controller,
         bufferHighWaterBytes: positiveSetting(settings.gateway_websocket_buffer_high_water_bytes, DEFAULT_BUFFER_HIGH_WATER_BYTES),
-        onDownstreamMessage: observer.onDownstreamMessage,
+        onDownstreamMessage(data: Dynamic, isBinary: Dynamic) {
+          observer.onDownstreamMessage(data, isBinary);
+          return rewriteDownstreamCompactionRequest(data, isBinary);
+        },
         onUpstreamMessage(data: Dynamic, isBinary: Dynamic) {
           observer.onUpstreamMessage(data, isBinary);
           return rewriteUpstreamMessage(data, isBinary, settings, store, helpers);
@@ -516,13 +520,24 @@ function createDeferredMessageTransformer(options: Dynamic) {
     const event = parseJson(data);
     if (event?.type !== "response.create") return undefined;
     const modelId = String(event.model || "").trim();
-    if (!modelId) return undefined;
-    const owner = hooks.upstreamService?.findRuntimeByModel?.(modelId) || null;
-    const expectedTargetId = owner?.id || "builtin-chatgpt-subscription-pool";
-    if (modelId === clientModel && expectedTargetId === target.id) return undefined;
-    closeWebSocketForReconnect(downstream, "model or channel changed");
-    return false;
+    if (modelId) {
+      const owner = hooks.upstreamService?.findRuntimeByModel?.(modelId) || null;
+      const expectedTargetId = owner?.id || "builtin-chatgpt-subscription-pool";
+      if (modelId !== clientModel || expectedTargetId !== target.id) {
+        closeWebSocketForReconnect(downstream, "model or channel changed");
+        return false;
+      }
+    }
+    return rewriteDownstreamCompactionRequest(data, false);
   };
+}
+
+function rewriteDownstreamCompactionRequest(data: Dynamic, isBinary: boolean) {
+  if (isBinary) return undefined;
+  const event = parseJson(data);
+  if (event?.type !== "response.create") return undefined;
+  const rewritten = rewriteGatewayCompactionRequest(event);
+  return rewritten.adapted ? Buffer.from(JSON.stringify(rewritten.body), "utf8") : undefined;
 }
 
 function selectFirstAccount(routing: Dynamic, routeContext: Dynamic, accounts: Dynamic) {

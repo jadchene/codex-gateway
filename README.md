@@ -2,76 +2,75 @@
 
 [中文文档](README_zh.md)
 
-Codex Gateway is a Windows desktop app for managing Codex accounts and model channels in one place.
+## What This Project Is
+
+Codex Gateway is a Windows desktop app for using ChatGPT subscription accounts and third-party model channels from Codex in one place.
 
 ![Codex Gateway overview](docs/screenshots/overview.png)
 
-## What You Can Do
+## Why Use It
 
-- Add ChatGPT subscription accounts and view their five-hour and seven-day quotas.
-- Add Responses API model channels such as DeepSeek-compatible services.
-- Use bundled Codex models and third-party models from the Codex model picker.
-- Set input, cached-input, and output prices for each model.
-- Start and stop Codex Gateway and MCP Gateway.
-- Review requests, token usage, latency, estimated cost, and runtime errors.
-- Switch between light and dark themes.
+- Switch between subscription and third-party models from the Codex model picker.
+- View account quotas, channel balances, request usage, latency, and estimated cost.
+- Keep account and channel configuration in a local `data/` directory beside the app.
+- Manage Codex Gateway and an optional MCP Gateway from one interface.
 
-## Get Started
+## Quick Start
 
 1. Open `Codex Gateway.exe`.
-2. Add a subscription account from **Subscription Accounts**.
-3. Add any third-party service from **Model Channels**.
-4. Open **Access Mode** and apply Gateway mode.
-5. Start Codex Gateway from **Services**.
-6. Select the model you want in Codex.
+2. Add a ChatGPT subscription account, a model channel, or both.
+3. Open **Access Mode** and apply Gateway mode.
+4. Start Codex Gateway from **Services**.
+5. Return to Codex and select a model.
 
-Gateway mode lets Codex use both subscription accounts and configured model channels. Account mode connects Codex directly to one selected subscription account.
+Gateway mode makes subscription and third-party models available together. Account mode connects Codex directly to one selected subscription account.
 
-## Subscription Accounts
+## Reference
 
-You can sign in through the browser or import the account currently used by Codex. The account list shows availability, quota windows, refresh time, and reset credits.
+### Subscription Accounts
 
-Accounts can be enabled, disabled, refreshed, or removed. Automatic quota refresh is configured under **Settings > Accounts and Quotas**.
+Sign in through the browser or import the account currently used by Codex. You can view quota and reset-credit status, refresh an account, enable or disable it, use an available reset credit, or remove the account.
 
-In the account detail's **Reset credits** list, every available reset credit has a **Use** button: it consumes the selected credit through `rate-limit-reset-credits/consume`, then re-fetches quota and reset credits from the server after a successful reset.
+### Model Channels
 
-Scheduled refresh also updates the balance of API channels that have a balance query configured; channels without one are skipped automatically.
+Each Responses API channel supports the following settings:
 
-## Model Channels
+- Channel name, API address, API key, and enabled state.
+- Provider-supplied Codex `models.json`; model IDs must be unique across channels.
+- WebSocket support. Leave it off when the provider supports HTTP only.
+- Remote compaction adaptation. Keep it enabled unless the provider explicitly supports native Codex compaction.
+- Optional balance lookup, public or encrypted request headers, and per-model input, cached-input, and output prices.
 
-Each third-party channel requires:
+You can inspect the imported model catalog and test a channel before using it in Codex.
 
-- A name, API address, and API key.
-- The channel's Codex `models.json` content.
-- Whether the channel supports Responses WebSocket.
-- Whether remote compaction adaptation is enabled (enabled by default).
-- Optional custom headers, balance lookup, and per-model prices.
+### Services and MCP Gateway
 
-Model IDs must be unique across all channels. Codex uses the selected model ID to choose its channel.
+The **Services** page starts and stops Codex Gateway and the optional [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure the MCP Gateway file path and address before starting it.
 
-The model JSON also tells Codex which tools, MCP features, input types, and reasoning levels the model supports. Use the metadata supplied by the model provider.
+### Settings
 
-If a channel does not support WebSocket, leave **Supports WS** disabled. Codex requests for that channel will use HTTP.
+| Area | Available settings |
+| --- | --- |
+| General | Launch with Windows, window-close behavior, and whether account selection ignores the five-hour quota window. |
+| Appearance | Light, dark, or system theme and comfortable or compact density. |
+| Codex Gateway | Listening address, port, local API key, automatic service start, and Codex connection method. |
+| Accounts and quotas | Refresh interval, refresh timeout, quota cooldown, quota display, and an optional third-party fallback model for auto review. |
+| Logs and billing | Request-log retention, runtime-log retention, and billing currency. |
+| MCP Gateway | Automatic start, configuration file path, host, port, and HTTP path. |
+| Storage | Current data location and controls for clearing request or runtime logs. |
+| Advanced network | Connection and idle timeouts, request timeout, shutdown grace period, HTTP and WebSocket limits, payload and buffer limits, and automatic HTTP fallback for HTTP-only models. Defaults are suitable for normal use. |
 
-**Remote compaction adaptation** solves the issue of third-party models that may not support remote compaction. Channels with native compaction support can turn this switch off.
+Some service settings take effect after the corresponding service is restarted.
 
-Codex auto review always sends the fixed `codex-auto-review` model ID. Under **Settings > Accounts and Quotas**, you can select a third-party channel model for it: when the subscription account pool has no usable quota, the gateway routes the auto review request to that channel model. Leave it empty to fail the request when the pool is unavailable.
+### Data and Backup
 
-By default, when the model currently selected in Codex only supports HTTP, the gateway returns 426 while the new WebSocket connection is being created so Codex falls back to HTTP immediately instead of waiting for the first request. You can disable this under **Settings > Network** with **Reject HTTP-only models on WebSocket handshake**.
+Packaged application data is stored in `data/` beside the app. Back up this directory before moving or replacing the application. Do not share it because it contains account and channel configuration.
 
-## MCP Gateway
-
-Codex Gateway can manage a local [`mcp-gateway-service`](https://github.com/jadchene/mcp-gateway). Configure its file path and address under **Settings > MCP Integration**, then start it from **Services**.
-
-## Data
-
-Application data is stored beside the packaged app in `data/`. The **Settings > Storage and Maintenance** page shows the exact location and provides controls for clearing request and runtime logs.
-
-Back up the `data/` directory before moving the app or making major changes. Do not share it because it contains account and channel configuration.
+This project is intended for personal local use. Use your own accounts and API keys, and follow each provider's terms.
 
 ## Development
 
-Node.js 24 is required.
+Node.js 24 or newer is required.
 
 ```bash
 npm install
@@ -85,11 +84,7 @@ Create the Windows unpacked build with:
 npm run pack:unpacked
 ```
 
-The output is `release/win-unpacked/Codex Gateway.exe`. The app is not code-signed and no installer is included.
-
-## Usage Notice
-
-This project is intended for personal local development. Use your own accounts and API keys, and follow the terms of each service provider. Do not use it for account sharing, resale, or bypassing service restrictions.
+The output is `release/win-unpacked/Codex Gateway.exe`. It is not code-signed and does not include an installer.
 
 ## License
 

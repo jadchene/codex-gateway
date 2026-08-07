@@ -828,10 +828,78 @@ test("HTTP gateway wraps compaction responses for API channels with the adaptati
     const compactionDones = events.filter((event) => event.type === "response.output_item.done" && event.item?.type === "compaction");
     assert.equal(compactionDones.length, 1);
     assert.equal(compactionDones[0].item.encrypted_content, "Summarized history.");
+    assert.match(compactionDones[0].item.id, /^cmp_cgw_plain_v1_/);
     assert.ok(events.findIndex((event) => event.type === "response.output_item.done" && event.item?.type === "compaction")
       < events.findIndex((event) => event.type === "response.completed"));
     assert.equal(harness.tokenLogs.at(-1).total_tokens, 14);
     assert.equal(harness.tokenLogs.at(-1).upstream_id, "api-owner");
+  } finally {
+    await harness.close();
+    await closeServer(apiUpstream);
+  }
+});
+
+test("HTTP gateway rewrites its plaintext compaction before routing to an API channel", async () => {
+  const apiRequests = [];
+  const apiUpstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    apiRequests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}\n\n');
+  });
+  await listen(apiUpstream);
+  const apiPort = apiUpstream.address().port;
+  const hooks = {
+    upstreamService: {
+      findRuntimeByModel() {
+        return {
+          id: "third-party-owner",
+          name: "Third Party",
+          kind: "responses_api",
+          enabled: true,
+          baseUrl: `http://127.0.0.1:${apiPort}/v1`,
+          apiKey: "provider-key",
+          supportsWebSocket: false,
+          compactAdaptEnabled: true,
+          requestHeaders: {},
+          credentialRef: "provider-fingerprint"
+        };
+      },
+      getModelPricing() {
+        return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 1 };
+      },
+      recordRequestOutcome() {}
+    }
+  };
+  const harness = await startHarness((_req, res) => {
+    res.writeHead(500);
+    res.end();
+  }, {}, hooks);
+  try {
+    const response = await gatewayFetch(harness, "/v1/responses", {
+      headers: codexHeaders("portable-compaction", "turn-2"),
+      body: JSON.stringify({
+        model: "any-third-party-model",
+        input: [
+          {
+            id: "cmp_cgw_plain_v1_test",
+            type: "compaction",
+            encrypted_content: "Summarized portable context."
+          },
+          { type: "message", role: "user", content: [{ type: "input_text", text: "continue" }] }
+        ]
+      })
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(apiRequests[0].input, [
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Summarized portable context." }]
+      },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "continue" }] }
+    ]);
   } finally {
     await harness.close();
     await closeServer(apiUpstream);

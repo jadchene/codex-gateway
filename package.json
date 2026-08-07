@@ -1,6 +1,6 @@
 {
   "name": "codex-gateway",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Personal Codex account manager and local gateway.",
   "license": "MIT",

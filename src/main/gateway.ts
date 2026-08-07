@@ -7,7 +7,7 @@ import { createGatewayWebSocketGateway } from "./gateway-websocket.ts";
 import { readCurrentCodexModel } from "./codex-cli-auth.ts";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
 import { extractTokenUsage, createSseUsageParser, emptyUsage } from "./gateway/usage-parser.ts";
-import { adaptCompactionStream, isCompactionTriggerRequest } from "./gateway/compaction-adapter.ts";
+import { adaptCompactionStream, isCompactionTriggerRequest, rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
 import {
   syncAccountUsageFromHeaders,
   buildCodexQuotaHeaders,
@@ -227,7 +227,11 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
   let disposeUpstream = () => {};
   try {
     const bodyLimit = positiveSetting(settings.gateway_request_body_limit_bytes, DEFAULT_REQUEST_BODY_LIMIT_BYTES);
-    const incomingBody = await readBody(req, bodyLimit, lifecycle.signal);
+    const rawIncomingBody = await readBody(req, bodyLimit, lifecycle.signal);
+    const rewrittenCompactionRequest = pathname === "/v1/responses"
+      ? rewriteGatewayCompactionRequest(rawIncomingBody)
+      : { adapted: false, body: rawIncomingBody };
+    const incomingBody = rewrittenCompactionRequest.body;
     request = buildGatewayRequest(settings.upstream_base_url, req.url, incomingBody);
     const routeContext = runtime.routing?.context(req.headers) || { established: false, accountId: "" };
     if (routeContext.unknownTurnState) {

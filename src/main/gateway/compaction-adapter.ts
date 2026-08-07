@@ -1,7 +1,11 @@
+import { randomUUID } from "node:crypto";
+
 interface SseEvent {
   raw: string;
   data: Record<string, unknown> | null;
 }
+
+export const GATEWAY_PLAINTEXT_COMPACTION_ID_PREFIX = "cmp_cgw_plain_v1_";
 
 /**
  * Codex CLI remote compaction v2 sends a normal `/v1/responses` request whose
@@ -17,6 +21,28 @@ export function isCompactionTriggerRequest(body: unknown): boolean {
   const payload = parseJsonObject(body);
   if (!Array.isArray(payload.input)) return false;
   return payload.input.some((item) => isRecord(item) && item.type === "compaction_trigger");
+}
+
+export function rewriteGatewayCompactionRequest(body: unknown): { adapted: boolean; body: unknown } {
+  const payload = parseJsonObject(body);
+  if (!Array.isArray(payload.input)) return { adapted: false, body };
+
+  let adapted = false;
+  const input = payload.input.map((item) => {
+    if (!isGatewayPlaintextCompaction(item)) return item;
+    adapted = true;
+    return {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: item.encrypted_content }]
+    };
+  });
+  if (!adapted) return { adapted: false, body };
+
+  const rewritten = { ...payload, input };
+  if (Buffer.isBuffer(body)) return { adapted: true, body: Buffer.from(JSON.stringify(rewritten), "utf8") };
+  if (typeof body === "string") return { adapted: true, body: JSON.stringify(rewritten) };
+  return { adapted: true, body: rewritten };
 }
 
 export function adaptCompactionStream(text: string): { adapted: boolean; text: string } {
@@ -52,7 +78,7 @@ export function adaptCompactionStream(text: string): { adapted: boolean; text: s
 
   const nextIndex = Math.max(0, maxOutputIndex + 1);
   const compactionItem = {
-    id: `cmp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+    id: `${GATEWAY_PLAINTEXT_COMPACTION_ID_PREFIX}${randomUUID().replaceAll("-", "")}`,
     type: "compaction",
     encrypted_content: summary
   };
@@ -79,6 +105,14 @@ function outputTextFromItem(item: Record<string, unknown>): string {
     if (type === "output_text" || type === "text") return String(part.text || "");
     return "";
   }).join("");
+}
+
+function isGatewayPlaintextCompaction(value: unknown): value is Record<string, any> & { encrypted_content: string } {
+  return isRecord(value)
+    && value.type === "compaction"
+    && typeof value.id === "string"
+    && value.id.startsWith(GATEWAY_PLAINTEXT_COMPACTION_ID_PREFIX)
+    && typeof value.encrypted_content === "string";
 }
 
 function splitSseEvents(text: string): SseEvent[] {

@@ -281,7 +281,14 @@ test("Responses WebSocket selects an external channel by its exact model ID with
       type: "response.create",
       model: "deepseek-chat",
       reasoning: { effort: "high", summary: "auto" },
-      input: "hello"
+      input: [
+        {
+          id: "cmp_cgw_plain_v1_websocket",
+          type: "compaction",
+          encrypted_content: "Portable WebSocket summary"
+        },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] }
+      ]
     }));
     const downstreamEvents = (await responseMessages).map((data) => JSON.parse(data.toString()));
     const completedPayload = downstreamEvents.find((event) => event.type === "response.completed");
@@ -303,7 +310,14 @@ test("Responses WebSocket selects an external channel by its exact model ID with
       type: "response.create",
       model: "deepseek-chat",
       reasoning: { effort: "high", summary: "auto" },
-      input: "hello"
+      input: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Portable WebSocket summary" }]
+        },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] }
+      ]
     });
     websocket.close();
     await nextClose(websocket);
