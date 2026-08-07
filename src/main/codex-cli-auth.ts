@@ -111,20 +111,30 @@ export function ensureProviderConfig(settings: Settings, options: CodexPathOptio
 export function nextGatewayConfig(current: unknown, settings: Settings, options: CodexPathOptions = {}): string {
   const withoutActiveProvider = String(current || "")
     .replace(/^\s*model_provider\s*=.*\r?\n?/m, "")
-    .replace(/^\s*model_catalog_json\s*=.*\r?\n?/m, "");
+    .replace(/^\s*model_catalog_json\s*=.*\r?\n?/m, "")
+    .replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
   return replaceGatewayProviderBlock(withoutActiveProvider, gatewayProviderBlock(settings, options));
 }
 
 export function gatewayProviderBlock(settings: Settings, options: CodexPathOptions = {}): string {
   const host = gatewayProviderBaseHost(settings.gateway_host);
   const port = settings.gateway_port || "8436";
+  const baseUrl = `http://${host}:${port}/v1`;
+  const catalog = `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`;
+  if (useOpenaiBaseUrl(settings)) {
+    return [
+      catalog,
+      `openai_base_url = "${baseUrl}"`,
+      ""
+    ].join("\n");
+  }
   return [
     'model_provider = "codex_gateway"',
-    `model_catalog_json = ${tomlString(managedModelCatalogPath(options).replaceAll("\\", "/"))}`,
+    catalog,
     "",
     "[model_providers.codex_gateway]",
     'name = "OpenAI"',
-    `base_url = "http://${host}:${port}/v1"`,
+    `base_url = "${baseUrl}"`,
     'wire_api = "responses"',
     "supports_websockets = true",
     ""
@@ -142,6 +152,7 @@ export function replaceGatewayProviderBlock(current: unknown, block: unknown): s
   if (/^\s*model_provider\s*=\s*"codex_gateway"\s*$/m.test(next)) {
     next = next.replace(/^\s*model_provider\s*=\s*"codex_gateway"\s*\r?\n?/m, "");
   }
+  next = next.replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
   next = next.replace(/\r?\n?\[model_providers\.codex_gateway\]\r?\n(?:[^\[\r\n].*\r?\n?)*/m, "\n");
   next = next.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
   return insertProviderBlockIntoConfig(next, block);
@@ -176,7 +187,12 @@ export function removeGatewayProviderConfig(options: CodexPathOptions = {}): boo
 }
 
 export function withoutGatewayProvider(current: unknown): string {
-  let next = String(current || "")
+  let next = String(current || "");
+  if (/^\s*openai_base_url\s*=.*$/m.test(next)) {
+    next = next.replace(/^\s*model_provider\s*=\s*"openai"\s*\r?\n?/m, "")
+      .replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
+  }
+  next = next
     .replace(/^\s*model_provider\s*=\s*"codex_gateway"\s*\r?\n?/m, "")
     .replace(/^\s*model_catalog_json\s*=.*models\.json.*\r?\n?/m, "")
     .replace(/\r?\n?\[model_providers\.codex_gateway\]\r?\n(?:[^\[\r\n].*\r?\n?)*/m, "\n");
@@ -229,7 +245,12 @@ export function repairConfigSpacing(options: CodexPathOptions = {}): boolean {
 
 function hasGatewayProvider(config: string): boolean {
   return /^\s*model_provider\s*=\s*"codex_gateway"\s*$/m.test(config)
-    || /^\s*\[model_providers\.codex_gateway\]\s*$/m.test(config);
+    || /^\s*\[model_providers\.codex_gateway\]\s*$/m.test(config)
+    || /^\s*openai_base_url\s*=.*$/m.test(config);
+}
+
+function useOpenaiBaseUrl(settings: Settings): boolean {
+  return String(settings.codex_config_use_openai_base_url || "").trim() !== "false";
 }
 
 function readJsonSafe(file: string): any {

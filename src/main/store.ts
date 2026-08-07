@@ -221,6 +221,7 @@ function migrate(db: Db): void {
     close_behavior: "exit",
     codex_quota_headers_mode: "block",
     codex_auth_mode: "gateway",
+    codex_config_use_openai_base_url: "true",
     codex_selected_account_id: "",
     gateway_current_account_id: "",
     gateway_last_daily_rebalance_date: "",

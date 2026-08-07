@@ -8,7 +8,7 @@ import { test } from "vitest";
 import { createSecretCodec, PREFIX } from "../src/main/secret-codec.ts";
 import { createStore } from "../src/main/store.ts";
 import { editableSettingsPatch, isTrustedRendererUrl, publicAccount, publicSettings } from "../src/main/renderer-boundary.ts";
-import { applyGatewayMode, nextGatewayConfig, writeFilesTransaction } from "../src/main/codex-cli-auth.ts";
+import { applyGatewayMode, gatewayProviderBlock, nextGatewayConfig, withoutGatewayProvider, writeFilesTransaction } from "../src/main/codex-cli-auth.ts";
 import { createMcpGatewayService, resolveWindowsNpmShim } from "../src/main/mcp-gateway-service.ts";
 import { isStrongGatewayApiKey } from "../src/main/gateway.ts";
 import { createUsageRefreshCoordinator } from "../src/main/usage-refresh-coordinator.ts";
@@ -229,6 +229,8 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
   assert.equal(safeSettings.gateway_api_key_configured, "true");
   assert.match(safeSettings.gateway_api_key_fingerprint, /^[a-f0-9]{12}$/);
   assert.throws(() => editableSettingsPatch({ appearance_theme: "midnight" }), /取值无效/);
+  assert.deepEqual(editableSettingsPatch({ codex_config_use_openai_base_url: "false" }), { codex_config_use_openai_base_url: "false" });
+  assert.throws(() => editableSettingsPatch({ codex_config_use_openai_base_url: "maybe" }), /取值无效/);
   assert.throws(() => editableSettingsPatch({ gateway_port: "70000" }), /超出范围/);
   assert.throws(() => editableSettingsPatch({ upstream_base_url: "file:///secret" }), /HTTP/);
   assert.deepEqual(editableSettingsPatch({
@@ -257,9 +259,101 @@ test("renderer boundary strips secrets, validates settings, and rejects foreign 
 test("gateway provider config replaces another active provider while preserving its block", () => {
   const current = ['model_provider = "custom"', "", "[model_providers.custom]", 'name = "Custom"', ""].join("\n");
   const next = nextGatewayConfig(current, { gateway_host: "localhost", gateway_port: "8436" });
-  assert.match(next, /^model_provider = "codex_gateway"/m);
+  assert.match(next, /^openai_base_url = "http:\/\/localhost:8436\/v1"/m);
+  assert.doesNotMatch(next, /^model_provider\s*=/m);
   assert.match(next, /\[model_providers\.custom\]/);
+  assert.doesNotMatch(next, /codex_gateway/);
+
+  const custom = nextGatewayConfig(current, {
+    gateway_host: "localhost",
+    gateway_port: "8436",
+    codex_config_use_openai_base_url: "false"
+  });
+  assert.match(custom, /^model_provider = "codex_gateway"/m);
+  assert.match(custom, /\[model_providers\.custom\]/);
+  assert.match(custom, /\[model_providers\.codex_gateway\]/);
+});
+
+test("switching gateway config to custom provider clears openai_base_url residue", () => {
+  const current = gatewayProviderBlock({ gateway_host: "localhost", gateway_port: "8436" });
+  const next = nextGatewayConfig(current, {
+    gateway_host: "localhost",
+    gateway_port: "8436",
+    codex_config_use_openai_base_url: "false"
+  });
+  assert.doesNotMatch(next, /openai_base_url/);
+  assert.match(next, /^model_provider = "codex_gateway"/m);
   assert.match(next, /\[model_providers\.codex_gateway\]/);
+  assert.match(next, /model_catalog_json/);
+});
+
+test("switching gateway config to openai_base_url clears custom provider residue", () => {
+  const current = gatewayProviderBlock({
+    gateway_host: "localhost",
+    gateway_port: "8436",
+    codex_config_use_openai_base_url: "false"
+  });
+  const next = nextGatewayConfig(current, { gateway_host: "localhost", gateway_port: "8436" });
+  assert.doesNotMatch(next, /codex_gateway/);
+  assert.doesNotMatch(next, /^model_provider\s*=/m);
+  assert.match(next, /openai_base_url = "http:\/\/localhost:8436\/v1"/);
+  assert.match(next, /model_catalog_json/);
+});
+
+test("withoutGatewayProvider clears simplified openai_base_url config without provider line", () => {
+  const current = [
+    'model = "gpt-5.4"',
+    'model_catalog_json = "C:/Users/test/.codex/models.json"',
+    'openai_base_url = "http://localhost:8436/v1"',
+    "",
+    "[notice.model_migrations]",
+    '"gpt-5.3-codex" = "gpt-5.4"',
+    ""
+  ].join("\n");
+  const next = withoutGatewayProvider(current);
+  assert.doesNotMatch(next, /openai_base_url/);
+  assert.doesNotMatch(next, /model_catalog_json/);
+  assert.match(next, /^model = "gpt-5\.4"/m);
+  assert.match(next, /\[notice\.model_migrations\]/);
+});
+
+test("withoutGatewayProvider clears custom provider config", () => {
+  const current = [
+    'model = "gpt-5.4"',
+    'model_provider = "codex_gateway"',
+    'model_catalog_json = "C:/Users/test/.codex/models.json"',
+    "",
+    "[model_providers.codex_gateway]",
+    'name = "OpenAI"',
+    'base_url = "http://localhost:8436/v1"',
+    "",
+    "[notice.model_migrations]",
+    '"gpt-5.3-codex" = "gpt-5.4"',
+    ""
+  ].join("\n");
+  const next = withoutGatewayProvider(current);
+  assert.doesNotMatch(next, /codex_gateway/);
+  assert.doesNotMatch(next, /model_catalog_json/);
+  assert.match(next, /^model = "gpt-5\.4"/m);
+  assert.match(next, /\[notice\.model_migrations\]/);
+});
+
+test("withoutGatewayProvider removes the simplified openai_base_url config with its provider line", () => {
+  const current = [
+    'model = "gpt-5.4"',
+    'model_provider = "openai"',
+    'model_catalog_json = "C:/Users/test/.codex/models.json"',
+    'openai_base_url = "http://localhost:8436/v1"',
+    "",
+    "[notice.model_migrations]",
+    '"gpt-5.3-codex" = "gpt-5.4"',
+    ""
+  ].join("\n");
+  const next = withoutGatewayProvider(current);
+  assert.doesNotMatch(next, /model_provider = "openai"/);
+  assert.doesNotMatch(next, /openai_base_url/);
+  assert.match(next, /^model = "gpt-5\.4"/m);
+  assert.match(next, /\[notice\.model_migrations\]/);
 });
 
 test("applying gateway mode configures the generated total model catalog", () => {
@@ -280,6 +374,8 @@ test("applying gateway mode configures the generated total model catalog", () =>
     }, { codexDir: directory, modelCatalogPath: catalogPath });
     const config = fs.readFileSync(path.join(directory, "config.toml"), "utf8");
     assert.match(config, /model_catalog_json/);
+    assert.match(config, /openai_base_url = "http:\/\/localhost:8436\/v1"/);
+    assert.doesNotMatch(config, /model_provider/);
     assert.equal(result.modelCatalogPath, catalogPath);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -330,7 +426,8 @@ test("applying gateway mode preserves symbolic links and writes their targets", 
     assert.equal(fs.lstatSync(authLink).isSymbolicLink(), true);
     assert.equal(fs.lstatSync(configLink).isSymbolicLink(), true);
     assert.equal(JSON.parse(fs.readFileSync(authTarget, "utf8")).OPENAI_API_KEY, "local-test-key");
-    assert.match(fs.readFileSync(configTarget, "utf8"), /^model_provider = "codex_gateway"/m);
+    assert.match(fs.readFileSync(configTarget, "utf8"), /^openai_base_url = "http:\/\/localhost:8436\/v1"/m);
+    assert.doesNotMatch(fs.readFileSync(configTarget, "utf8"), /model_provider/);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

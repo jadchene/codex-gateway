@@ -13,7 +13,8 @@ const EDITABLE_SETTING_KEYS = new Set([
   "usage_refresh_interval_secs", "usage_refresh_timeout_ms", "auto_start_gateway", "auto_start_mcp_gateway",
   "mcp_gateway_config_path", "mcp_gateway_host", "mcp_gateway_port", "mcp_gateway_path",
   "startup_launch", "close_behavior", "codex_quota_headers_mode",
-  "ignore_five_hour_limit", "billing_currency", "request_log_retention_days", "app_log_retention_days",
+  "ignore_five_hour_limit", "codex_config_use_openai_base_url",
+  "billing_currency", "request_log_retention_days", "app_log_retention_days",
   "appearance_theme", "appearance_density", "navigation_collapsed"
 ]);
 
@@ -45,6 +46,7 @@ const ENUM_SETTINGS = {
   close_behavior: ["exit", "tray"],
   codex_quota_headers_mode: ["block", "rewrite"],
   ignore_five_hour_limit: ["true", "false"],
+  codex_config_use_openai_base_url: ["true", "false"],
   appearance_theme: ["light", "dark", "system"],
   appearance_density: ["comfortable", "compact"],
   navigation_collapsed: ["true", "false"],

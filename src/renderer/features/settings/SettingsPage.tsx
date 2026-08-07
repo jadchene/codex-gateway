@@ -49,6 +49,7 @@ type SettingsFormValues = Record<string, unknown> & {
   auto_start_gateway_enabled: boolean;
   auto_start_mcp_gateway_enabled: boolean;
   ignore_five_hour_limit_enabled: boolean;
+  codex_config_write_mode: "base_url" | "provider";
 };
 
 const SECOND_FIELDS: Record<string, string> = {
@@ -223,6 +224,14 @@ export const SettingsPage = ({
           </div>
           <Form.Item name="auto_start_gateway_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
         </Flex>
+      </SettingsSection>
+      <SettingsSection title="Codex 接入" description="选择 Codex 客户端连接本地网关的方式。">
+        <Form.Item name="codex_config_write_mode" label="连接方式" style={{ maxWidth: 260 }}>
+          <Select options={[
+            { label: "Base URL", value: "base_url" },
+            { label: "Provider", value: "provider" }
+          ]} />
+        </Form.Item>
       </SettingsSection>
     </Space>
   );
@@ -451,13 +460,14 @@ export const settingsToForm = (settings: SettingsRecord): SettingsFormValues => 
   values.auto_start_gateway_enabled = settings.auto_start_gateway === "true";
   values.auto_start_mcp_gateway_enabled = settings.auto_start_mcp_gateway === "true";
   values.ignore_five_hour_limit_enabled = settings.ignore_five_hour_limit === "true";
+  values.codex_config_write_mode = settings.codex_config_use_openai_base_url !== "false" ? "base_url" : "provider";
   return values;
 };
 
 export const formToSettings = (current: SettingsRecord, values: Partial<SettingsFormValues>): SettingsRecord => {
   const next: SettingsRecord = { ...current };
   for (const [key, value] of Object.entries(values)) {
-    if (key in SECOND_FIELDS || key in MIB_FIELDS || key.endsWith("_enabled")) continue;
+    if (key in SECOND_FIELDS || key in MIB_FIELDS || key.endsWith("_enabled") || key === "codex_config_write_mode") continue;
     if (key === "gateway_api_key" && !String(value || "").trim()) continue;
     next[key] = String(value ?? "").trim();
   }
@@ -479,6 +489,9 @@ export const formToSettings = (current: SettingsRecord, values: Partial<Settings
   }
   if (Object.prototype.hasOwnProperty.call(values, "ignore_five_hour_limit_enabled")) {
     next.ignore_five_hour_limit = values.ignore_five_hour_limit_enabled ? "true" : "false";
+  }
+  if (Object.prototype.hasOwnProperty.call(values, "codex_config_write_mode")) {
+    next.codex_config_use_openai_base_url = values.codex_config_write_mode === "base_url" ? "true" : "false";
   }
   return next;
 };

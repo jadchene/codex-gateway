@@ -144,9 +144,16 @@ const maskedGatewayKey = (settings: Settings): string => settings.gateway_api_ke
 
 const providerToml = (settings: Settings, gatewayBase: string, modelCatalogPath: string): string => {
   const baseUrl = gatewayBase || `http://${gatewayProviderHost(settings.gateway_host)}:${settings.gateway_port || "8436"}/v1`;
+  const catalog = `model_catalog_json = "${modelCatalogPath.replaceAll("\\", "/")}"`;
+  if (settings.codex_config_use_openai_base_url !== "false") {
+    return [
+      catalog,
+      `openai_base_url = "${baseUrl}"`
+    ].join("\n");
+  }
   return [
     'model_provider = "codex_gateway"',
-    `model_catalog_json = "${modelCatalogPath.replaceAll("\\", "/")}"`,
+    catalog,
     "",
     "[model_providers.codex_gateway]",
     'name = "OpenAI"',

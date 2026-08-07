@@ -204,6 +204,8 @@ describe("Ant Design pages", () => {
     expect(screen.getByRole("heading", { name: "接入模式" })).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /网关模式/ }));
     expect(screen.getByText(/model_catalog_json = "D:\/data\/models\.json"/)).toBeTruthy();
+    expect(screen.getByText(/openai_base_url = "http:\/\/localhost:8436\/v1"/)).toBeTruthy();
+    expect(screen.queryByText(/model_provider = "openai"/)).toBeNull();
     await user.click(screen.getByRole("button", { name: /应用到 Codex/ }));
     expect(onApplyGateway).toHaveBeenCalledOnce();
   });

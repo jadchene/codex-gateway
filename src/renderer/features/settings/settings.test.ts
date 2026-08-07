@@ -91,6 +91,21 @@ describe("settings appearance and display units", () => {
     expect(formToSettings(settings, { ...form, gateway_api_key: "replacement" }).gateway_api_key).toBe("replacement");
   });
 
+  it("round-trips the Codex openai_base_url config option and defaults to enabled", () => {
+    const settings = {
+      codex_config_use_openai_base_url: "false",
+      auto_start_gateway: "false",
+      auto_start_mcp_gateway: "false",
+      ignore_five_hour_limit: "false"
+    };
+    const form = settingsToForm(settings);
+    expect(form.codex_config_write_mode).toBe("provider");
+    const saved = formToSettings(settings, { ...form, codex_config_write_mode: "base_url" });
+    expect(saved.codex_config_use_openai_base_url).toBe("true");
+    expect(saved.codex_config_write_mode).toBeUndefined();
+    expect(settingsToForm({}).codex_config_write_mode).toBe("base_url");
+  });
+
   it("preserves unmounted setting sections instead of converting missing fields to zero", () => {
     const current = {
       gateway_connect_timeout_ms: "30000",

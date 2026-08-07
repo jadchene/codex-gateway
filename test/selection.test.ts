@@ -800,12 +800,24 @@ test("insertProviderBlockIntoConfig keeps all root keys before the first table",
   assert.ok(next.indexOf('model_provider = "codex_gateway"') < next.indexOf("[notice.model_migrations]"));
 });
 
-test("gatewayProviderBlock uses OpenAI provider name for compact support", () => {
+test("gatewayProviderBlock uses openai_base_url override by default", () => {
   const block = gatewayProviderBlock({ gateway_host: "localhost", gateway_port: "8436" }, { modelCatalogPath: "C:/data/models.json" });
+  assert.doesNotMatch(block, /^model_provider\s*=/m);
+  assert.match(block, /openai_base_url = "http:\/\/localhost:8436\/v1"/);
+  assert.doesNotMatch(block, /\[model_providers\./);
+  assert.match(block, /model_catalog_json = "C:\/data\/models\.json"/);
+});
+
+test("gatewayProviderBlock keeps custom provider when simplified config is disabled", () => {
+  const block = gatewayProviderBlock(
+    { gateway_host: "localhost", gateway_port: "8436", codex_config_use_openai_base_url: "false" },
+    { modelCatalogPath: "C:/data/models.json" }
+  );
+  assert.match(block, /^model_provider = "codex_gateway"/m);
   assert.match(block, /name = "OpenAI"/);
   assert.match(block, /wire_api = "responses"/);
   assert.match(block, /supports_websockets = true/);
-  assert.match(block, /model_catalog_json = "C:\/data\/models\.json"/);
+  assert.doesNotMatch(block, /openai_base_url/);
 });
 
 test("gateway config replaces any previous catalog with the generated total catalog", () => {
@@ -838,8 +850,11 @@ test("incremental SSE usage parser handles split and oversized completed events"
 
 test("gatewayProviderBlock writes localhost base URL for wildcard listener", () => {
   const block = gatewayProviderBlock({ gateway_host: "0.0.0.0", gateway_port: "8436" });
-  assert.match(block, /base_url = "http:\/\/localhost:8436\/v1"/);
-  assert.doesNotMatch(block, /base_url = "http:\/\/0\.0\.0\.0:8436\/v1"/);
+  assert.match(block, /openai_base_url = "http:\/\/localhost:8436\/v1"/);
+  assert.doesNotMatch(block, /openai_base_url = "http:\/\/0\.0\.0\.0:8436\/v1"/);
+  const custom = gatewayProviderBlock({ gateway_host: "0.0.0.0", gateway_port: "8436", codex_config_use_openai_base_url: "false" });
+  assert.match(custom, /base_url = "http:\/\/localhost:8436\/v1"/);
+  assert.doesNotMatch(custom, /base_url = "http:\/\/0\.0\.0\.0:8436\/v1"/);
 });
 
 test("mcp gateway command omits optional HTTP arguments by default", () => {
@@ -881,9 +896,34 @@ test("replaceGatewayProviderBlock repairs existing provider name", () => {
     '"gpt-5.3-codex" = "gpt-5.4"',
     ""
   ].join("\n");
-  const next = replaceGatewayProviderBlock(current, gatewayProviderBlock({ gateway_host: "localhost", gateway_port: "8436" }));
+  const next = replaceGatewayProviderBlock(current, gatewayProviderBlock({
+    gateway_host: "localhost",
+    gateway_port: "8436",
+    codex_config_use_openai_base_url: "false"
+  }));
   assert.equal((next.match(/\[model_providers\.codex_gateway\]/g) || []).length, 1);
   assert.match(next, /name = "OpenAI"/);
   assert.doesNotMatch(next, /name = "Codex Gateway"/);
   assert.ok(next.indexOf('model_provider = "codex_gateway"') < next.indexOf("[notice.model_migrations]"));
+});
+
+test("default openai_base_url config replaces a legacy codex_gateway provider block", () => {
+  const current = [
+    'model = "gpt-5.4"',
+    "",
+    'model_provider = "codex_gateway"',
+    "",
+    "[model_providers.codex_gateway]",
+    'name = "Codex Gateway"',
+    'base_url = "http://localhost:8436/v1"',
+    'wire_api = "responses"',
+    "",
+    "[notice.model_migrations]",
+    '"gpt-5.3-codex" = "gpt-5.4"',
+    ""
+  ].join("\n");
+  const next = replaceGatewayProviderBlock(current, gatewayProviderBlock({ gateway_host: "localhost", gateway_port: "8436" }));
+  assert.doesNotMatch(next, /codex_gateway/);
+  assert.match(next, /openai_base_url = "http:\/\/localhost:8436\/v1"/);
+  assert.ok(next.indexOf('openai_base_url = "http://localhost:8436/v1"') < next.indexOf("[notice.model_migrations]"));
 });
