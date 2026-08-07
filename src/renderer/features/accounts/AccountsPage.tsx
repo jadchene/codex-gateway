@@ -27,7 +27,7 @@ import {
 } from "antd";
 import type { MenuProps, TableColumnsType } from "antd";
 import { useMemo, useState } from "react";
-import type { PublicAccount, ResetCredit } from "../../../shared/contracts/accounts";
+import type { ConsumeResetCreditResult, PublicAccount, ResetCredit } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
 import { formatTime, parseResetCredits, resetCreditStatusLabel } from "../../lib/formatters";
 
@@ -42,6 +42,8 @@ interface AccountsPageProps {
   onCancelLogin: () => void;
   onRefreshUsage: (account: PublicAccount) => Promise<void>;
   onRefreshAll: () => Promise<void>;
+  onConsumeResetCredit: (account: PublicAccount, creditId?: string) => Promise<ConsumeResetCreditResult | void>;
+  consumingResetIds: Set<string>;
   onSetEnabled: (account: PublicAccount, enabled: boolean) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }
@@ -57,6 +59,8 @@ export const AccountsPage = ({
   onCancelLogin,
   onRefreshUsage,
   onRefreshAll,
+  onConsumeResetCredit,
+  consumingResetIds,
   onSetEnabled,
   onDelete
 }: AccountsPageProps) => {
@@ -239,9 +243,36 @@ export const AccountsPage = ({
             { title: "状态", dataIndex: "status", width: 90, render: (value) => <Tag>{resetCreditStatusLabel(value)}</Tag> },
             { title: "重置类型", dataIndex: "title", width: 150, ellipsis: true, render: (value) => value || "-" },
             { title: "有效期开始", dataIndex: "granted_at", width: 160, render: (value) => formatTime(value) },
-            { title: "有效期结束", dataIndex: "expires_at", width: 160, render: (value) => formatTime(value) }
+            { title: "有效期结束", dataIndex: "expires_at", width: 160, render: (value) => formatTime(value) },
+            {
+              title: "操作",
+              key: "actions",
+              width: 90,
+              render: (_, credit) => {
+                const busy = Boolean(detailAccount && consumingResetIds.has(detailAccount.id));
+                const disabled = busy || String(credit.status || "").toLowerCase() !== "available";
+                return (
+                  <Popconfirm
+                    title="使用这张重置卡？"
+                    description="将消耗一次重置机会，并以服务器返回的数据为准刷新额度。"
+                    okText="使用"
+                    okButtonProps={{ danger: true }}
+                    disabled={disabled}
+                    onConfirm={async () => {
+                      if (!detailAccount) return;
+                      const result = await onConsumeResetCredit(detailAccount, credit.id);
+                      if (result?.account) setDetailAccount(result.account);
+                    }}
+                  >
+                    <Button size="small" type="link" loading={busy} disabled={disabled}>
+                      使用
+                    </Button>
+                  </Popconfirm>
+                );
+              }
+            }
           ]}
-          scroll={{ x: 560 }}
+          scroll={{ x: 660 }}
           tableLayout="fixed"
           locale={{ emptyText: <Empty description="暂无重置次数数据，请先刷新账号额度。" /> }}
         />

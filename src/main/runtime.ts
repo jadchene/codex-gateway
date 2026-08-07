@@ -1,6 +1,7 @@
 type Dynamic = any;
 
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, safeStorage, screen, shell } from "electron";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +19,15 @@ import { createUpstreamService } from "./upstreams/upstream-service.ts";
 import { createCodexModelCatalogService } from "./codex-model-catalog.ts";
 import { createAuthService, accountFromTokens } from "./auth.ts";
 import { normalizeUsagePayload, normalizeResetCreditsPayload } from "./quota.ts";
+import {
+  buildConsumeRequestBody,
+  isConsumeSuccess,
+  normalizeConsumeResult,
+  parseStoredResetCredits,
+  pickAvailableResetCredit,
+  pickResetCreditById,
+  requestResetCreditConsume
+} from "./reset-credit.ts";
 import { applyGatewayMode, applyAccountMode, detectCodexAuthMode, ensureProviderConfig } from "./codex-cli-auth.ts";
 import type { IpcChannel, IpcContract } from "../shared/contracts/ipc.ts";
 import { ipcArgumentSchemas } from "../shared/schemas/ipc.ts";
@@ -493,6 +503,11 @@ function registerIpc() {
     return publicAccount(result);
   });
   handleIpc("accounts:refreshAllUsage", async () => refreshAllUsage("manual"));
+  handleIpc("accounts:consumeResetCredit", async (_event, id, creditId) => {
+    const result = await consumeResetCredit(id, creditId);
+    notifyDataChanged(["accounts"]);
+    return result;
+  });
   handleIpc("accounts:importLocalCodex", async () => publicAccount(await importLocalCodexAccount()));
 }
 
@@ -1091,6 +1106,88 @@ async function refreshUsage(id: Dynamic) {
     }
   }
   throw lastError || new Error("Usage refresh failed.");
+}
+
+const pendingResetCreditConsumes = new Set<string>();
+
+async function consumeResetCredit(accountId: Dynamic, creditId: Dynamic = "") {
+  if (pendingResetCreditConsumes.has(accountId)) {
+    throw new Error("该账号正在使用重置卡，请稍候。");
+  }
+  pendingResetCreditConsumes.add(accountId);
+  try {
+    let account = store.listAccounts().find((item: Dynamic) => item.id === accountId);
+    if (!account) throw new Error("Account not found.");
+    if (!account.access_token) throw new Error("账号缺少访问令牌，请先重新登录。");
+    const storedCredits = parseStoredResetCredits(account.reset_credits_json);
+    // 用户选定卡：始终以该 credit_id 请求（本地列表过期也不阻断，服务器为准）；
+    // 未指定卡：回退为最早过期的可用卡。
+    const credit = creditId
+      ? pickResetCreditById(storedCredits, creditId) ?? { id: String(creditId).trim() }
+      : pickAvailableResetCredit(storedCredits);
+    // 幂等键与选卡在重试间保持不变，避免重复消耗。
+    const body = buildConsumeRequestBody(credit);
+    const endpoint = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume";
+    let lastError: Dynamic = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const payload = await requestResetCreditConsume({
+          endpoint,
+          account,
+          body,
+          timeoutMs: usageRefreshTimeoutMs()
+        });
+        const result = normalizeConsumeResult(payload);
+        if (result.status === "error") {
+          lastError = new Error(result.message);
+          continue;
+        }
+        const label = account.email || account.name || account.id;
+        if (isConsumeSuccess(result.status)) {
+          let refreshed: Dynamic = account;
+          try {
+            refreshed = await refreshUsage(account.id);
+          } catch (refreshError: Dynamic) {
+            store.addAppLog({
+              level: "warn",
+              scope: "usage",
+              action: "consume-reset-credit",
+              status: "refresh-failed",
+              message: `重置卡已使用，但额度刷新失败：${label}（${refreshError.message}），请稍后手动刷新`
+            });
+          }
+          store.addAppLog({
+            scope: "usage",
+            action: "consume-reset-credit",
+            status: result.status,
+            message: `账号已使用重置卡：${refreshed.email || refreshed.name || refreshed.id}（${result.message}）`
+          });
+          return { status: result.status, message: result.message, account: publicAccount(refreshed) };
+        }
+        store.addAppLog({
+          scope: "usage",
+          action: "consume-reset-credit",
+          status: result.status,
+          message: `账号使用重置卡未消耗：${label}（${result.message}）`
+        });
+        return { status: result.status, message: result.message, account: publicAccount(account) };
+      } catch (error) {
+        lastError = error;
+        if (attempt > 0) break;
+        if (shouldRefreshForUsageError(error) && account.refresh_token) {
+          try {
+            const refreshedTokens = await refreshAccessToken(account);
+            account = store.saveAccount({ ...account, ...refreshedTokens });
+          } catch (refreshError: Dynamic) {
+            throw new Error(`刷新 token 失败：${refreshError.message}`);
+          }
+        }
+      }
+    }
+    throw lastError || new Error("使用重置卡失败。");
+  } finally {
+    pendingResetCreditConsumes.delete(accountId);
+  }
 }
 
 function scheduleUsageResetRefresh(account: Dynamic, reason: Dynamic = "usage-refresh") {

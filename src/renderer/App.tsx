@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "./app/layout/AppShell";
 import { applyAppearancePreferences, appearanceFromSettings } from "./app/appearance";
-import type { PublicAccount } from "../shared/contracts/accounts";
+import type { ConsumeResetCreditResult, PublicAccount } from "../shared/contracts/accounts";
 import type { BootstrapData } from "../shared/contracts/bootstrap";
 import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shared/contracts/logs";
 import type { RuntimePaths, ServiceStatus, Settings } from "../shared/contracts/settings";
@@ -49,6 +49,7 @@ function App() {
   const [loginId, setLoginId] = useState("");
   const [refreshingIds, setRefreshingIds] = useState(() => new Set<string>());
   const [retryIds, setRetryIds] = useState(() => new Set<string>());
+  const [consumingResetIds, setConsumingResetIds] = useState(() => new Set<string>());
   const tokenLogsRef = useRef(tokenLogs);
   const appLogsRef = useRef(appLogs);
   const tokenLogQueryRef = useRef<LogQuery | null>(null);
@@ -251,6 +252,24 @@ function App() {
     }
   }
 
+  async function consumeResetCredit(account: PublicAccount, creditId?: string): Promise<ConsumeResetCreditResult | void> {
+    setConsumingResetIds((prev) => new Set(prev).add(account.id));
+    try {
+      const result = await api.consumeResetCredit(account.id, creditId);
+      await reload();
+      setMessage(`${account.name}：${result.message}`);
+      return result;
+    } catch (error) {
+      setMessage(`使用重置卡失败：${errorMessage(error)}`);
+    } finally {
+      setConsumingResetIds((prev) => {
+        const next = new Set(prev);
+        next.delete(account.id);
+        return next;
+      });
+    }
+  }
+
   async function refreshAllUsage() {
     setMessage("正在刷新所有账号额度...");
     try {
@@ -393,6 +412,8 @@ function App() {
             }}
             onRefreshUsage={refreshUsage}
             onRefreshAll={refreshAllUsage}
+            onConsumeResetCredit={consumeResetCredit}
+            consumingResetIds={consumingResetIds}
             onSetEnabled={setAccountEnabled}
             refreshingIds={refreshingIds}
             retryIds={retryIds}

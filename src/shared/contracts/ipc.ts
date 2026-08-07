@@ -1,4 +1,10 @@
-import type { PublicAccount, LoginStartResult, LoginStatus, UsageRefreshResult } from "./accounts";
+import type {
+  ConsumeResetCreditResult,
+  PublicAccount,
+  LoginStartResult,
+  LoginStatus,
+  UsageRefreshResult
+} from "./accounts";
 import type { BootstrapData } from "./bootstrap";
 import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "./logs";
 import type { ServiceStatus, Settings } from "./settings";
@@ -51,6 +57,7 @@ export type IpcContract = {
   "auth:status": IpcSpec<[loginId: string], LoginStatus>;
   "accounts:refreshUsage": IpcSpec<[id: string], unknown>;
   "accounts:refreshAllUsage": IpcSpec<[], UsageRefreshResult[]>;
+  "accounts:consumeResetCredit": IpcSpec<[id: string, creditId?: string], ConsumeResetCreditResult>;
   "accounts:importLocalCodex": IpcSpec<[], PublicAccount>;
 };
 

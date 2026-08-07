@@ -33,6 +33,8 @@ You can sign in through the browser or import the account currently used by Code
 
 Accounts can be enabled, disabled, refreshed, or removed. Automatic quota refresh is configured under **Settings > Accounts and Quotas**.
 
+In the account detail's **Reset credits** list, every available reset credit has a **Use** button: it consumes the selected credit through `rate-limit-reset-credits/consume`, then re-fetches quota and reset credits from the server after a successful reset.
+
 Scheduled refresh also updates the balance of API channels that have a balance query configured; channels without one are skipped automatically.
 
 ## Model Channels

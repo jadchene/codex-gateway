@@ -1,8 +1,17 @@
 export interface ResetCredit {
+  id?: string;
   status?: string;
   title?: string;
   granted_at?: number;
   expires_at?: number;
+}
+
+export type ResetCreditConsumeStatus = "reset" | "already_redeemed" | "nothing_to_reset" | "no_credit" | "error";
+
+export interface ConsumeResetCreditResult {
+  status: ResetCreditConsumeStatus;
+  message: string;
+  account: PublicAccount;
 }
 
 export interface PublicAccount {

@@ -8,6 +8,7 @@ export interface NormalizedUsage {
   quota_7d_reset_at?: number;
 }
 interface NormalizedCredit {
+  id: string;
   status: string;
   title: string;
   granted_at: number | null;
@@ -75,6 +76,7 @@ export function normalizeResetCreditsPayload(payload: any): {
       ? root.items
       : [];
   const credits: NormalizedCredit[] = rawCredits.map((item: any) => ({
+    id: cleanText(item?.id),
     status: cleanText(item?.status),
     title: cleanText(item?.title || item?.type || item?.reset_type),
     granted_at: timestampFrom(item?.granted_at ?? item?.starts_at ?? item?.valid_from),

@@ -89,6 +89,7 @@ test("normalizeResetCreditsPayload extracts available reset credits", () => {
     available_count: 1,
     credits: [
       {
+        id: "credit-1",
         status: "available",
         title: "Full reset (Weekly + 5 hr)",
         granted_at: "2026-06-27 08:05:59 CST",
@@ -106,6 +107,7 @@ test("normalizeResetCreditsPayload extracts available reset credits", () => {
   assert.equal(credits.reset_credits_next_expires_at, 4_088_793_959);
   const parsed = JSON.parse(credits.reset_credits_json);
   assert.equal(parsed.available_count, 1);
+  assert.equal(parsed.credits[0].id, "credit-1");
   assert.equal(parsed.credits[0].status, "available");
   assert.equal(parsed.credits[0].title, "Full reset (Weekly + 5 hr)");
   assert.equal(parsed.credits[0].granted_at, 1_782_518_759);

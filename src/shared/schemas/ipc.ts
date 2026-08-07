@@ -55,5 +55,6 @@ export const ipcArgumentSchemas = {
   "auth:status": z.tuple([id]),
   "accounts:refreshUsage": z.tuple([id]),
   "accounts:refreshAllUsage": empty,
+  "accounts:consumeResetCredit": z.tuple([id, id.optional()]),
   "accounts:importLocalCodex": empty
 } satisfies Record<IpcChannel, z.ZodType>;

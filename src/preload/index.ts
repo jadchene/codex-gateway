@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { PublicAccount, LoginStartResult, LoginStatus, UsageRefreshResult } from "../shared/contracts/accounts";
+import type {
+  ConsumeResetCreditResult,
+  PublicAccount,
+  LoginStartResult,
+  LoginStatus,
+  UsageRefreshResult
+} from "../shared/contracts/accounts";
 import type { BootstrapData } from "../shared/contracts/bootstrap";
 import type { IpcChannel, IpcContract } from "../shared/contracts/ipc";
 import type { AppLogPage, LogQuery, RequestLogPage, TokenSummary } from "../shared/contracts/logs";
@@ -47,6 +53,7 @@ const api = {
   testUpstreamInvocation: (upstreamId: string, modelId: string): Promise<UpstreamInvocationTestResult> => invoke("upstreams:testInvocation", upstreamId, modelId),
   refreshUsage: (id: string): Promise<unknown> => invoke("accounts:refreshUsage", id),
   refreshAllUsage: (): Promise<UsageRefreshResult[]> => invoke("accounts:refreshAllUsage"),
+  consumeResetCredit: (id: string, creditId?: string): Promise<ConsumeResetCreditResult> => invoke("accounts:consumeResetCredit", id, creditId),
   importLocalCodexAccount: (): Promise<PublicAccount> => invoke("accounts:importLocalCodex"),
   listTokenLogs: (query: LogQuery): Promise<RequestLogPage> => invoke("tokens:list", query),
   tokenSummary: (query?: LogQuery): Promise<TokenSummary> => invoke("tokens:summary", query),

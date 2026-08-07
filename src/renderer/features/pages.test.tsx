@@ -62,7 +62,8 @@ describe("Ant Design pages", () => {
     const onStartLogin = vi.fn().mockResolvedValue(undefined);
     render(<AccountsPage accounts={[]} loginId="" refreshingIds={new Set()} retryIds={new Set()} settings={{}}
       onStartLogin={onStartLogin} onImportLocal={vi.fn()} onCancelLogin={vi.fn()} onRefreshUsage={vi.fn()}
-      onRefreshAll={vi.fn()} onSetEnabled={vi.fn()} onDelete={vi.fn()} />);
+      onRefreshAll={vi.fn()} onConsumeResetCredit={vi.fn()} consumingResetIds={new Set()}
+      onSetEnabled={vi.fn()} onDelete={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: /添加账号/ }));
     await user.click(screen.getByRole("button", { name: /浏览器认证/ }));
     expect(onStartLogin).toHaveBeenCalledOnce();
