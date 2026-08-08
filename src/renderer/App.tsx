@@ -398,9 +398,9 @@ function App() {
       setTokenLogs(await api.listTokenLogs(query));
       setTokenSummary(await api.tokenSummary(query));
       setDashboardSummary(await api.tokenSummary());
-      setMessage(`已清空调用记录：${result.deleted || 0} 条`);
+      setMessage(`已清空调用分析：${result.deleted || 0} 条`);
     } catch (error) {
-      setMessage(`清空调用记录失败：${errorMessage(error)}`);
+      setMessage(`清空调用分析失败：${errorMessage(error)}`);
     }
   }
 

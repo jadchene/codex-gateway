@@ -173,15 +173,15 @@ const QuotaCard = ({ title, detail, capacity }: { title: string; detail: QuotaDe
   const remaining = Math.max(0, Number(detail?.remaining_percent || 0));
   const progress = Math.round(Math.max(0, Math.min(100, remaining / Math.max(1, Number(capacity || 100)) * 100)) * 10) / 10;
   return (
-    <Card className="v1-overview-card v1-overview-status-card">
-      <Flex align="center" justify="space-between" gap={16}>
+    <Card className="v1-overview-card v1-overview-status-card v1-overview-quota-card">
+      <Typography.Text type="secondary">{title}</Typography.Text>
+      <div className="v1-overview-quota-body">
         <div>
-          <Typography.Text type="secondary">{title}</Typography.Text>
           <Typography.Title level={3}>{remaining.toFixed(1)}%</Typography.Title>
           <Typography.Text type="secondary">重置：{formatTime(detail?.reset_at)}</Typography.Text>
         </div>
         <Progress type="dashboard" percent={progress} size={92} strokeColor={progress < 20 ? "#dc2626" : "#2563eb"} />
-      </Flex>
+      </div>
     </Card>
   );
 };

@@ -326,8 +326,8 @@ export const SettingsPage = ({
         <Flex align="center" justify="space-between" gap={16} wrap>
           <Typography.Text type="secondary">只清理本地记录，不删除账号、模型渠道或应用设置。</Typography.Text>
           <Space>
-            <Popconfirm title="清空全部调用记录？" description="此操作不可恢复。" okButtonProps={{ danger: true }} onConfirm={onClearTokenLogs}>
-              <Button danger>清空调用记录</Button>
+            <Popconfirm title="清空全部调用分析？" description="此操作不可恢复。" okButtonProps={{ danger: true }} onConfirm={onClearTokenLogs}>
+              <Button danger>清空调用分析</Button>
             </Popconfirm>
             <Popconfirm title="清空全部运行日志？" description="此操作不可恢复。" okButtonProps={{ danger: true }} onConfirm={onClearAppLogs}>
               <Button danger>清空运行日志</Button>
