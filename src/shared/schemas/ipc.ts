@@ -54,6 +54,7 @@ export const ipcArgumentSchemas = {
   "codexAuth:applyAccountMode": z.tuple([id]),
   "auth:startLogin": empty,
   "auth:status": z.tuple([id]),
+  "auth:cancelLogin": z.tuple([id]),
   "accounts:refreshUsage": z.tuple([id]),
   "accounts:refreshAllUsage": empty,
   "accounts:consumeResetCredit": z.tuple([id, id.optional()]),

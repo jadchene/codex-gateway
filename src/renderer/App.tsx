@@ -28,6 +28,8 @@ const pages = [
   { id: "settings", label: "设置中心", description: "调整应用、API 服务、MCP 服务、额度、日志和外观设置。" }
 ];
 
+type BrowserLoginPhase = "idle" | "starting" | "waiting" | "success" | "failed";
+
 function App() {
   const api = window.codexGateway;
   const location = useLocation();
@@ -47,6 +49,8 @@ function App() {
   const [appVersion, setAppVersion] = useState("");
   const [message, setMessage] = useState("");
   const [loginId, setLoginId] = useState("");
+  const [loginPhase, setLoginPhase] = useState<BrowserLoginPhase>("idle");
+  const [loginError, setLoginError] = useState("");
   const [refreshingIds, setRefreshingIds] = useState(() => new Set<string>());
   const [retryIds, setRetryIds] = useState(() => new Set<string>());
   const [consumingResetIds, setConsumingResetIds] = useState(() => new Set<string>());
@@ -57,6 +61,7 @@ function App() {
   const appLogsPausedRef = useRef(false);
   const [appLogsPaused, setAppLogsPaused] = useState(false);
   const [pendingAppLogBatches, setPendingAppLogBatches] = useState(0);
+  const loginAttemptRef = useRef(0);
 
   async function reload() {
     const data = await api.bootstrap();
@@ -160,13 +165,23 @@ function App() {
         if (cancelled) return;
         if (status.status === "success") {
           setLoginId("");
+          setLoginPhase("success");
+          setLoginError("");
           await reload();
           setMessage("登录成功，账号已保存");
           return;
         }
-        if (status.status === "failed") {
+        if (status.status === "failed" || status.status === "cancelled" || status.status === "unknown") {
           setLoginId("");
-          setMessage(`登录失败：${status.error || "未知错误"}`);
+          if (status.status === "cancelled") {
+            setLoginPhase("idle");
+            setLoginError("");
+          } else {
+            const error = status.error || (status.status === "unknown" ? "授权会话已失效" : "未知错误");
+            setLoginPhase("failed");
+            setLoginError(error);
+            setMessage(`登录失败：${error}`);
+          }
           return;
         }
         timer = setTimeout(poll, 1800);
@@ -214,22 +229,50 @@ function App() {
   }
 
   async function startLogin() {
+    const attempt = ++loginAttemptRef.current;
+    setLoginPhase("starting");
+    setLoginError("");
     try {
       const result = await api.startLogin();
+      if (attempt !== loginAttemptRef.current) {
+        await api.cancelLogin(result.loginId);
+        return;
+      }
       setLoginId(result.loginId);
+      setLoginPhase("waiting");
       setMessage("已打开浏览器登录页面，完成授权后会自动保存账号");
     } catch (error) {
-      setMessage(`启动登录失败：${errorMessage(error)}`);
+      if (attempt !== loginAttemptRef.current) return;
+      const detail = errorMessage(error);
+      setLoginPhase("failed");
+      setLoginError(detail);
+      setMessage(`启动登录失败：${detail}`);
     }
   }
 
-  async function importLocalCodexAccount() {
+  async function cancelLogin() {
+    loginAttemptRef.current += 1;
+    const currentLoginId = loginId;
+    setLoginId("");
+    setLoginPhase("idle");
+    setLoginError("");
+    if (!currentLoginId) return;
+    try {
+      await api.cancelLogin(currentLoginId);
+    } catch (error) {
+      setMessage(`取消授权失败：${errorMessage(error)}`);
+    }
+  }
+
+  async function importLocalCodexAccount(): Promise<boolean> {
     try {
       const account = await api.importLocalCodexAccount();
       await reload();
       setMessage(`已导入账号：${account.name}`);
+      return true;
     } catch (error) {
       setMessage(`本地读取失败：${errorMessage(error)}`);
+      return false;
     }
   }
 
@@ -407,13 +450,16 @@ function App() {
         {page === "accounts" && (
           <AccountsPage
             accounts={accounts}
-            loginId={loginId}
+            loginPhase={loginPhase}
+            loginError={loginError}
             settings={settings}
             onStartLogin={startLogin}
             onImportLocal={importLocalCodexAccount}
-            onCancelLogin={() => {
-              setLoginId("");
-              setMessage("已取消等待授权");
+            onCancelLogin={cancelLogin}
+            onResetLogin={() => {
+              if (loginId) return;
+              setLoginPhase("idle");
+              setLoginError("");
             }}
             onRefreshUsage={refreshUsage}
             onRefreshAll={refreshAllUsage}

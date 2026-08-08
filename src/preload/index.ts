@@ -71,6 +71,7 @@ const api = {
   applyAccountAuth: (accountId: string): Promise<ApplyAuthResult> => invoke("codexAuth:applyAccountMode", accountId),
   startLogin: (): Promise<LoginStartResult> => invoke("auth:startLogin"),
   loginStatus: (loginId: string): Promise<LoginStatus> => invoke("auth:status", loginId),
+  cancelLogin: (loginId: string): Promise<{ cancelled: boolean }> => invoke("auth:cancelLogin", loginId),
   onGatewayStatusChanged: (callback: StatusChangedListener) => onStatusChanged("gateway:status-changed", callback),
   onMcpGatewayStatusChanged: (callback: StatusChangedListener) => onStatusChanged("mcpGateway:status-changed", callback),
   onDataChanged: (callback: DataChangedListener) => {

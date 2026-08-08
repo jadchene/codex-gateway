@@ -57,6 +57,7 @@ export type IpcContract = {
   "codexAuth:applyAccountMode": IpcSpec<[accountId: string], ApplyAuthResult>;
   "auth:startLogin": IpcSpec<[], LoginStartResult>;
   "auth:status": IpcSpec<[loginId: string], LoginStatus>;
+  "auth:cancelLogin": IpcSpec<[loginId: string], { cancelled: boolean }>;
   "accounts:refreshUsage": IpcSpec<[id: string], unknown>;
   "accounts:refreshAllUsage": IpcSpec<[], UsageRefreshResult[]>;
   "accounts:consumeResetCredit": IpcSpec<[id: string, creditId?: string], ConsumeResetCreditResult>;

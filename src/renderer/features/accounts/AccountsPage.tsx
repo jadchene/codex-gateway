@@ -9,6 +9,7 @@ import {
   ReloadOutlined
 } from "@ant-design/icons";
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -21,6 +22,7 @@ import {
   Progress,
   Row,
   Space,
+  Spin,
   Statistic,
   Table,
   Tag,
@@ -28,20 +30,22 @@ import {
   Typography
 } from "antd";
 import type { TableColumnsType } from "antd";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ConsumeResetCreditResult, PublicAccount, ResetCredit } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
 import { formatTime, parseResetCredits, resetCreditStatusLabel } from "../../lib/formatters";
 
 interface AccountsPageProps {
   accounts: PublicAccount[];
-  loginId: string;
+  loginPhase: "idle" | "starting" | "waiting" | "success" | "failed";
+  loginError: string;
   refreshingIds: Set<string>;
   retryIds: Set<string>;
   settings: Settings;
   onStartLogin: () => Promise<void>;
-  onImportLocal: () => Promise<void>;
-  onCancelLogin: () => void;
+  onImportLocal: () => Promise<boolean>;
+  onCancelLogin: () => Promise<void>;
+  onResetLogin: () => void;
   onRefreshUsage: (account: PublicAccount) => Promise<void>;
   onRefreshAll: () => Promise<void>;
   onConsumeResetCredit: (account: PublicAccount, creditId?: string) => Promise<ConsumeResetCreditResult | void>;
@@ -52,13 +56,15 @@ interface AccountsPageProps {
 
 export const AccountsPage = ({
   accounts,
-  loginId,
+  loginPhase,
+  loginError,
   refreshingIds,
   retryIds,
   settings,
   onStartLogin,
   onImportLocal,
   onCancelLogin,
+  onResetLogin,
   onRefreshUsage,
   onRefreshAll,
   onConsumeResetCredit,
@@ -67,6 +73,7 @@ export const AccountsPage = ({
   onDelete
 }: AccountsPageProps) => {
   const [addOpen, setAddOpen] = useState(false);
+  const [importingLocal, setImportingLocal] = useState(false);
   const [detailAccount, setDetailAccount] = useState<PublicAccount | null>(null);
   const resetCredits = useMemo(() => parseResetCredits(detailAccount), [detailAccount]);
   const enabledAccounts = accounts.filter((account) => account.enabled && account.status !== "disabled");
@@ -76,9 +83,31 @@ export const AccountsPage = ({
     return value && (!latest || new Date(value).getTime() > new Date(latest).getTime()) ? value : latest;
   }, null);
 
-  const runAddAction = async (action: () => Promise<void>): Promise<void> => {
+  const loginBusy = loginPhase === "starting" || loginPhase === "waiting";
+
+  useEffect(() => {
+    if (loginPhase !== "success") return;
     setAddOpen(false);
-    await action();
+    onResetLogin();
+  }, [loginPhase, onResetLogin]);
+
+  const openAddModal = (): void => {
+    if (!loginBusy) onResetLogin();
+    setAddOpen(true);
+  };
+
+  const closeAddModal = async (): Promise<void> => {
+    if (loginBusy) await onCancelLogin();
+    setAddOpen(false);
+  };
+
+  const importLocalAccount = async (): Promise<void> => {
+    setImportingLocal(true);
+    try {
+      if (await onImportLocal()) setAddOpen(false);
+    } finally {
+      setImportingLocal(false);
+    }
   };
 
   const columns: TableColumnsType<PublicAccount> = [
@@ -173,10 +202,9 @@ export const AccountsPage = ({
     <Card className="v1-page-card v1-page-fill" variant="borderless">
       <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
         <Space wrap>
-          {loginId && <Button onClick={onCancelLogin}>取消等待授权</Button>}
           <Button icon={<ReloadOutlined />} onClick={onRefreshAll}>刷新全部</Button>
-          <Button type="primary" icon={<PlusOutlined />} disabled={Boolean(loginId)} onClick={() => setAddOpen(true)}>
-            {loginId ? "等待授权" : "添加账号"}
+          <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
+            {loginBusy ? "等待授权" : "添加账号"}
           </Button>
         </Space>
       </Flex>
@@ -197,16 +225,28 @@ export const AccountsPage = ({
         locale={{ emptyText: <Empty description="还没有账号，请先完成 ChatGPT/Codex 授权。" /> }}
       />
 
-      <Modal title="添加订阅账号" open={addOpen} footer={null} onCancel={() => setAddOpen(false)}>
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <Button block type="primary" icon={<LoginOutlined />} onClick={() => runAddAction(onStartLogin)}>
-            浏览器认证
-          </Button>
-          <Button block icon={<ImportOutlined />} onClick={() => runAddAction(onImportLocal)}>
-            从本机 Codex 读取
-          </Button>
-          <Typography.Text type="secondary">登录新账号请选择浏览器认证；也可以导入当前 Codex 已登录的账号。</Typography.Text>
-        </Space>
+      <Modal title="添加订阅账号" open={addOpen} footer={null} onCancel={() => void closeAddModal()}>
+        {loginBusy ? (
+          <Flex vertical align="center" gap={12} className="v1-account-login-waiting">
+            <Spin size="large" />
+            <Typography.Text strong>{loginPhase === "starting" ? "正在打开浏览器" : "等待浏览器授权"}</Typography.Text>
+            <Typography.Text type="secondary">请在浏览器中完成登录，授权成功后账号会自动保存。</Typography.Text>
+            <Button onClick={() => void onCancelLogin()}>取消</Button>
+          </Flex>
+        ) : (
+          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+            {loginPhase === "failed" && <Alert showIcon type="error" title="浏览器认证失败" description={loginError || "请重试"} />}
+            <Flex justify="center" gap={12}>
+              <Button type="primary" icon={<LoginOutlined />} style={{ width: 160 }} onClick={() => void onStartLogin()}>
+                浏览器认证
+              </Button>
+              <Button icon={<ImportOutlined />} loading={importingLocal} style={{ width: 160 }} onClick={() => void importLocalAccount()}>
+                从本机 Codex 读取
+              </Button>
+            </Flex>
+            <Typography.Text type="secondary">登录新账号可以使用浏览器认证，也可以读取本机 Codex 当前登录的账号。</Typography.Text>
+          </Space>
+        )}
       </Modal>
 
       <Drawer

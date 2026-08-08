@@ -24,6 +24,7 @@ interface AuthService {
   startLogin: () => Promise<LoginStartResult & { authUrl: string }>;
   completeCallback: (params: URLSearchParams) => Promise<AccountRecord>;
   loginStatus: (loginId: string) => LoginStatus & { error?: string | null };
+  cancelLogin: (loginId: string) => { cancelled: boolean };
   stop: () => Promise<void>;
 }
 
@@ -90,12 +91,14 @@ export function createAuthService(
     const code = String(params.get("code") || "").trim();
     const oauthError = String(params.get("error") || "").trim();
     const session = state ? store.getLoginSession(state) : null;
+    if (!state || !session) throw new Error("登录回调已过期或 state 不匹配");
+    if (session.status !== "pending") throw new Error(session.status === "cancelled" ? "登录授权已取消" : "登录回调已处理或已过期");
     if (oauthError) {
       const message = String(params.get("error_description") || oauthError);
-      if (session) store.updateLoginSession(state, "failed", message);
+      store.updateLoginSession(state, "failed", message);
       throw new Error(message);
     }
-    if (!state || !code || !session) throw new Error("登录回调已过期或 state 不匹配");
+    if (!code) throw new Error("登录回调缺少授权码");
     try {
       const tokens = await exchangeCodeForTokens({
         issuer: DEFAULT_ISSUER,
@@ -104,6 +107,7 @@ export function createAuthService(
         codeVerifier: session.code_verifier,
         code
       });
+      if (store.getLoginSession(state)?.status !== "pending") throw new Error("登录授权已取消");
       const account = accountFromTokens(tokens);
       const saved = store.saveAccount(account);
       if (refreshAccountUsage) {
@@ -128,7 +132,9 @@ export function createAuthService(
       store.updateLoginSession(state, "success", null);
       return store.listAccounts().find((item) => item.id === saved.id) || saved;
     } catch (error) {
-      store.updateLoginSession(state, "failed", errorMessage(error));
+      if (store.getLoginSession(state)?.status === "pending") {
+        store.updateLoginSession(state, "failed", errorMessage(error));
+      }
       throw error;
     }
   }
@@ -140,6 +146,13 @@ export function createAuthService(
       : { status: "unknown", error: null };
   }
 
+  function cancelLogin(loginId: string): { cancelled: boolean } {
+    const session = store.getLoginSession(loginId);
+    if (!session || session.status !== "pending") return { cancelled: false };
+    store.updateLoginSession(loginId, "cancelled", null);
+    return { cancelled: true };
+  }
+
   async function stop(): Promise<void> {
     if (!loginServer) return;
     const closing = loginServer;
@@ -147,7 +160,7 @@ export function createAuthService(
     await new Promise<void>((resolve, reject) => closing.close((error) => error ? reject(error) : resolve()));
   }
 
-  return { startLogin, completeCallback, loginStatus, stop };
+  return { startLogin, completeCallback, loginStatus, cancelLogin, stop };
 }
 
 export function loginRedirectUri(): string {

@@ -342,6 +342,12 @@ body {
   resize: none !important;
 }
 
+.v1-account-login-waiting {
+  min-height: 180px;
+  padding: 24px 0 12px;
+  text-align: center;
+}
+
 .v1-usage-section {
   margin-bottom: 20px;
 }

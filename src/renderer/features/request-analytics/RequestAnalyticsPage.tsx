@@ -22,7 +22,7 @@ import {
 } from "antd";
 import type { TableColumnsType } from "antd";
 import type { CSSProperties, ReactElement } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
 import type { RequestLog, RequestLogPage, TokenAccountSummary, TokenSummary, TokenTotals } from "../../../shared/contracts/logs";
 import type { Settings } from "../../../shared/contracts/settings";
@@ -56,6 +56,7 @@ const ANALYTICS_COLUMN_OPTIONS = [
 const DEFAULT_ANALYTICS_COLUMN_KEYS = ANALYTICS_COLUMN_OPTIONS
   .filter((item) => item.value !== "path")
   .map((item) => item.value);
+const ANALYTICS_COLUMN_STORAGE_KEY = "codexia:request-analytics:visible-columns";
 
 export const RequestAnalyticsPage = ({
   pageData,
@@ -68,11 +69,15 @@ export const RequestAnalyticsPage = ({
   const [filters, setFilters] = useState<LogFilterValues>(todayLogFilters);
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null);
   const [accountPoolExpanded, setAccountPoolExpanded] = useState(false);
-  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => [...DEFAULT_ANALYTICS_COLUMN_KEYS]);
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(loadVisibleColumnKeys);
   const upstreamQuery = useQuery({
     queryKey: ["upstreams", "analytics"],
     queryFn: () => window.codexGateway.listUpstreams()
   });
+
+  useEffect(() => {
+    localStorage.setItem(ANALYTICS_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumnKeys));
+  }, [visibleColumnKeys]);
 
   const runQuery = async (page = 1, pageSize = pageData.pageSize, nextFilters = filters): Promise<void> => {
     setFilters(nextFilters);
@@ -422,4 +427,15 @@ const requestLogDetails = (log: RequestLog, accountPoolName: string) => {
     总Token: log.total_tokens || 0,
     消息: log.message || "-"
   }).map(([key, value]) => ({ key, label: key, children: String(value) }));
+};
+
+const loadVisibleColumnKeys = (): string[] => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ANALYTICS_COLUMN_STORAGE_KEY) || "null");
+    if (!Array.isArray(stored)) return [...DEFAULT_ANALYTICS_COLUMN_KEYS];
+    const validKeys = new Set(ANALYTICS_COLUMN_OPTIONS.map((item) => item.value));
+    return stored.filter((value): value is string => typeof value === "string" && validKeys.has(value as typeof ANALYTICS_COLUMN_OPTIONS[number]["value"]));
+  } catch {
+    return [...DEFAULT_ANALYTICS_COLUMN_KEYS];
+  }
 };

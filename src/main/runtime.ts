@@ -498,6 +498,7 @@ function registerIpc() {
     return result;
   });
   handleIpc("auth:status", (_event, loginId) => authService.loginStatus(loginId));
+  handleIpc("auth:cancelLogin", (_event, loginId) => authService.cancelLogin(loginId));
   handleIpc("accounts:refreshUsage", async (_event, id) => {
     const result = await refreshUsage(id);
     store.addAppLog({ scope: "usage", action: "refresh-account", status: "success", message: `已刷新账号额度：${result.name}` });

@@ -22,6 +22,7 @@ const emptySummary = { total: {}, byAccount: [] };
 
 describe("Ant Design pages", () => {
   beforeEach(() => {
+    localStorage.clear();
     window.codexGateway = createBridge();
     Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
   });
@@ -85,13 +86,41 @@ describe("Ant Design pages", () => {
   it("opens account browser login", async () => {
     const user = userEvent.setup();
     const onStartLogin = vi.fn().mockResolvedValue(undefined);
-    render(<AccountsPage accounts={[]} loginId="" refreshingIds={new Set()} retryIds={new Set()} settings={{}}
-      onStartLogin={onStartLogin} onImportLocal={vi.fn()} onCancelLogin={vi.fn()} onRefreshUsage={vi.fn()}
-      onRefreshAll={vi.fn()} onConsumeResetCredit={vi.fn()} consumingResetIds={new Set()}
-      onSetEnabled={vi.fn()} onDelete={vi.fn()} />);
+    const onCancelLogin = vi.fn().mockResolvedValue(undefined);
+    const props = {
+      accounts: [],
+      loginPhase: "idle" as const,
+      loginError: "",
+      refreshingIds: new Set<string>(),
+      retryIds: new Set<string>(),
+      settings: {},
+      onStartLogin,
+      onImportLocal: vi.fn().mockResolvedValue(true),
+      onCancelLogin,
+      onResetLogin: vi.fn(),
+      onRefreshUsage: vi.fn(),
+      onRefreshAll: vi.fn(),
+      onConsumeResetCredit: vi.fn(),
+      consumingResetIds: new Set<string>(),
+      onSetEnabled: vi.fn(),
+      onDelete: vi.fn()
+    };
+    const view = render(<AccountsPage {...props} />);
     await user.click(screen.getByRole("button", { name: /添加账号/ }));
-    await user.click(screen.getByRole("button", { name: /浏览器认证/ }));
+    const browserLogin = screen.getByRole("button", { name: /浏览器认证/ });
+    const localLogin = screen.getByRole("button", { name: /从本机 Codex 读取/ });
+    expect(browserLogin.parentElement).toBe(localLogin.parentElement);
+    expect(browserLogin.style.width).toBe("160px");
+    expect(localLogin.style.width).toBe("160px");
+    await user.click(browserLogin);
     expect(onStartLogin).toHaveBeenCalledOnce();
+    expect(screen.getByText("添加订阅账号")).toBeTruthy();
+
+    view.rerender(<AccountsPage {...props} loginPhase="waiting" />);
+    expect(screen.getByText("等待浏览器授权")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /从本机 Codex 读取/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /取\s*消/ }));
+    expect(onCancelLogin).toHaveBeenCalledOnce();
   });
 
   it("shows the subscription expiry in account details", async () => {
@@ -107,8 +136,8 @@ describe("Ant Design pages", () => {
       subscription_expires_at: subscriptionExpiresAt,
       has_access_token: true,
       has_refresh_token: true
-    }]} loginId="" refreshingIds={new Set()} retryIds={new Set()} settings={{}}
-      onStartLogin={vi.fn()} onImportLocal={vi.fn()} onCancelLogin={vi.fn()} onRefreshUsage={vi.fn()}
+    }]} loginPhase="idle" loginError="" refreshingIds={new Set()} retryIds={new Set()} settings={{}}
+      onStartLogin={vi.fn()} onImportLocal={vi.fn()} onCancelLogin={vi.fn()} onResetLogin={vi.fn()} onRefreshUsage={vi.fn()}
       onRefreshAll={vi.fn()} onConsumeResetCredit={vi.fn()} consumingResetIds={new Set()}
       onSetEnabled={vi.fn()} onDelete={vi.fn()} />);
 
@@ -253,6 +282,27 @@ describe("Ant Design pages", () => {
     await user.click(screen.getByRole("button", { name: /重置/ }));
     expect(onQuery).toHaveBeenCalledTimes(2);
     expect(onQuery.mock.calls[1]?.[0]).not.toHaveProperty("accountId");
+  });
+
+  it("keeps request analytics column settings after the page remounts", async () => {
+    const user = userEvent.setup();
+    const props = {
+      pageData: emptyRequestPage,
+      summary: emptySummary,
+      accounts: [],
+      settings: {},
+      onMessage: vi.fn(),
+      onQuery: vi.fn().mockResolvedValue(undefined)
+    };
+    const view = renderWithQueries(<RequestAnalyticsPage {...props} />);
+    await user.click(screen.getByRole("button", { name: /列设置/ }));
+    await user.click(screen.getByRole("checkbox", { name: "路径" }));
+    expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
+    await waitFor(() => expect(localStorage.getItem("codexia:request-analytics:visible-columns")).toContain("path"));
+
+    view.unmount();
+    renderWithQueries(<RequestAnalyticsPage {...props} />);
+    expect(screen.getByRole("columnheader", { name: "路径" })).toBeTruthy();
   });
 
   it("pauses runtime logs", async () => {

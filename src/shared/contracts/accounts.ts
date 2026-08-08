@@ -46,6 +46,6 @@ export interface LoginStartResult {
 }
 
 export interface LoginStatus {
-  status: "pending" | "success" | "failed" | "unknown";
+  status: "pending" | "success" | "failed" | "cancelled" | "unknown";
   error?: string | null;
 }
