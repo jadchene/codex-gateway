@@ -8,6 +8,7 @@ import { readCurrentCodexModel } from "./codex-cli-auth.ts";
 import { estimateUpstreamCost } from "./upstreams/cost-estimator.ts";
 import { extractTokenUsage, createSseUsageParser, emptyUsage } from "./gateway/usage-parser.ts";
 import { adaptCompactionStream, isCompactionTriggerRequest, rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
+import { AUTO_REVIEW_MODEL_ID, isAutoReviewRequest, resolveAutoReviewFallback } from "./gateway/auto-review.ts";
 import {
   syncAccountUsageFromHeaders,
   buildCodexQuotaHeaders,
@@ -53,7 +54,6 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_UNARY_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_SHUTDOWN_GRACE_MS = 2 * 1000;
 const DEFAULT_QUOTA_COOLDOWN_MS = 60 * 1000;
-const AUTO_REVIEW_MODEL_ID = "codex-auto-review";
 
 function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}) {
   let server: Dynamic = null;
@@ -245,12 +245,13 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
       releaseAccountLoad = runtime.routing?.beginRequest(account.id) || (() => {});
       accountForLog = account;
     };
-    const selectedModel = String(parseResponsesPayload(incomingBody)?.model || "");
-    const isAutoReviewModel = selectedModel === AUTO_REVIEW_MODEL_ID;
-    const apiUpstream = !isAutoReviewModel && selectedModel
+    const payload = parseResponsesPayload(incomingBody);
+    const selectedModel = String(payload?.model || "");
+    const isAutoReview = isAutoReviewRequest(payload);
+    const apiUpstream = selectedModel
       ? hooks.upstreamService?.findRuntimeByModel?.(selectedModel)
       : null;
-    const result = isAutoReviewModel
+    const result = isAutoReview && !apiUpstream
       ? await callAutoReviewTarget({
         req,
         request,
@@ -261,7 +262,8 @@ async function handleRequest(req: Dynamic, res: Dynamic, store: Dynamic, authSer
         runtime,
         routeContext,
         signal: lifecycle.signal,
-        onAccountSelected
+        onAccountSelected,
+        clientModel: selectedModel
       })
       : apiUpstream
         ? await callDirectApiTarget({ req, request, incomingBody, settings, hooks, signal: lifecycle.signal, upstream: apiUpstream, modelId: selectedModel })
@@ -457,35 +459,40 @@ async function callSubscriptionTarget(options: Dynamic) {
 
 async function callAutoReviewTarget(options: Dynamic) {
   try {
-    return await callSubscriptionTarget(options);
+    const result = await callSubscriptionTarget(options);
+    if (isQuotaExhaustedResponse(result.response?.status, result.body)) {
+      return callAutoReviewFallback(options);
+    }
+    return result;
   } catch (error: Dynamic) {
     if (error?.code !== "SUBSCRIPTION_ACCOUNT_UNAVAILABLE") throw error;
-    const fallbackModel = String(options.settings?.auto_review_upstream_model || "").trim();
-    const fallbackUpstream = fallbackModel
-      ? options.hooks?.upstreamService?.findRuntimeByModel?.(fallbackModel)
-      : null;
-    if (!fallbackModel || !fallbackUpstream || fallbackUpstream.kind !== "responses_api") {
-      throw gatewayRouteError(
-        503,
-        "AUTO_REVIEW_FALLBACK_UNAVAILABLE",
-        "The subscription account pool is unavailable and no usable auto review fallback model is configured."
-      );
-    }
-    options.store?.addAppLog?.({
-      level: "info",
-      scope: "gateway",
-      action: "auto-review-fallback",
-      status: "api-upstream",
-      message: `账号池不可用，Auto Review 请求转由第三方渠道模型 ${fallbackModel} 处理。`
-    });
-    return callDirectApiTarget({
-      ...options,
-      upstream: fallbackUpstream,
-      modelId: fallbackModel,
-      clientModel: AUTO_REVIEW_MODEL_ID,
-      incomingBody: rewriteResponsesModel(options.incomingBody, fallbackModel)
-    });
+    return callAutoReviewFallback(options);
   }
+}
+
+async function callAutoReviewFallback(options: Dynamic) {
+  const fallback = resolveAutoReviewFallback(options.settings, options.hooks);
+  if (!fallback) {
+    throw gatewayRouteError(
+      503,
+      "AUTO_REVIEW_FALLBACK_UNAVAILABLE",
+      "The subscription account pool is unavailable and no usable auto review fallback model is configured."
+    );
+  }
+  options.store?.addAppLog?.({
+    level: "info",
+    scope: "gateway",
+    action: "auto-review-fallback",
+    status: "api-upstream",
+    message: `账号池不可用，Auto Review 请求转由第三方渠道模型 ${fallback.model} 处理。`
+  });
+  return callDirectApiTarget({
+    ...options,
+    upstream: fallback.upstream,
+    modelId: fallback.model,
+    clientModel: options.clientModel || AUTO_REVIEW_MODEL_ID,
+    incomingBody: rewriteResponsesModel(options.incomingBody, fallback.model)
+  });
 }
 
 function requestForSubscriptionTarget(request: Dynamic, settings: Dynamic, hooks: Dynamic) {

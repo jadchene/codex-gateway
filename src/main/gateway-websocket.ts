@@ -5,6 +5,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { bridgeWebSockets } from "./gateway-websocket-relay.ts";
 import { createWebSocketObserver } from "./gateway-websocket-observer.ts";
 import { rewriteGatewayCompactionRequest } from "./gateway/compaction-adapter.ts";
+import { isAutoReviewRequest, resolveAutoReviewFallback } from "./gateway/auto-review.ts";
 import { stripSubscriptionHeaders } from "./gateway/protocol.ts";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 30 * 1000;
@@ -332,7 +333,8 @@ async function handleDeferredResponsesUpgrade(options: Dynamic) {
       observer,
       hooks,
       target: selected.target,
-      clientModel: selected.clientModel
+      clientModel: selected.clientModel,
+      modelRewrite: selected.autoReviewFallbackModel
     });
     bridgeWebSockets({
       downstream,
@@ -425,6 +427,7 @@ async function selectDeferredResponsesRoute(options: Dynamic) {
     }
   }
 
+  const isAutoReview = isAutoReviewRequest(firstMessage.event);
   let accounts = store.listAccounts();
   let firstAccount = selectFirstAccount(runtime.routing, routeContext, accounts);
   if (!firstAccount && hooks.ensureUsableAccounts) {
@@ -433,33 +436,84 @@ async function selectDeferredResponsesRoute(options: Dynamic) {
     firstAccount = selectFirstAccount(runtime.routing, routeContext, accounts);
   }
   if (!firstAccount) {
+    if (isAutoReview) return connectAutoReviewWebSocketFallback({ ...options, clientModel: modelId });
     throw routeError(503, "SUBSCRIPTION_ACCOUNT_UNAVAILABLE", "No usable subscription account is available for this WebSocket session.");
   }
-  const connected = await connectWithFailover({
-    request,
-    settings,
-    store,
-    hooks,
-    helpers,
-    routing: runtime.routing,
-    routeContext,
-    firstAccount,
-    signal
+  try {
+    const connected = await connectWithFailover({
+      request,
+      settings,
+      store,
+      hooks,
+      helpers,
+      routing: runtime.routing,
+      routeContext,
+      firstAccount,
+      signal
+    });
+    return {
+      ...connected,
+      target: {
+        id: "builtin-chatgpt-subscription-pool",
+        name: "ChatGPT 订阅账号池",
+        kind: "chatgpt_subscription_pool",
+        credentialRef: connected.account.id,
+        modelPricing: hooks.upstreamService?.getModelPricing?.("builtin-chatgpt-subscription-pool", modelId)
+      },
+      clientModel: modelId,
+      upstreamModel: modelId,
+      attemptCount: 1,
+      attemptChain: []
+    };
+  } catch (error: Dynamic) {
+    if (isAutoReview && isWebSocketQuotaFailure(error, helpers)) {
+      return connectAutoReviewWebSocketFallback({ ...options, clientModel: modelId });
+    }
+    throw error;
+  }
+}
+
+async function connectAutoReviewWebSocketFallback(options: Dynamic) {
+  const { settings, hooks, helpers, request, signal, store, clientModel } = options;
+  const fallback = resolveAutoReviewFallback(settings, hooks);
+  if (!fallback) {
+    throw routeError(503, "SUBSCRIPTION_ACCOUNT_UNAVAILABLE", "No usable subscription account is available for this WebSocket session.");
+  }
+  if (!fallback.upstream.supportsWebSocket) {
+    throw routeError(426, "WEBSOCKET_NOT_SUPPORTED", `The selected auto review fallback model ${fallback.model} supports HTTP transport only.`);
+  }
+  store?.addAppLog?.({
+    level: "info",
+    scope: "gateway-websocket",
+    action: "auto-review-fallback",
+    status: "api-upstream",
+    message: `账号池不可用，Auto Review WebSocket 请求转由第三方渠道模型 ${fallback.model} 处理。`
   });
-  return {
-    ...connected,
-    target: {
-      id: "builtin-chatgpt-subscription-pool",
-      name: "ChatGPT 订阅账号池",
-      kind: "chatgpt_subscription_pool",
-      credentialRef: connected.account.id,
-      modelPricing: hooks.upstreamService?.getModelPricing?.("builtin-chatgpt-subscription-pool", modelId)
-    },
-    clientModel: modelId,
-    upstreamModel: modelId,
-    attemptCount: 1,
-    attemptChain: []
-  };
+  const started = Date.now();
+  try {
+    const connected = await openApiUpstream(request, fallback.upstream, settings, helpers, signal);
+    hooks.upstreamService.recordRequestOutcome?.(fallback.upstream.id, { status: 101, latencyMs: Date.now() - started });
+    return {
+      ...connected,
+      account: null,
+      target: {
+        ...fallback.upstream,
+        modelPricing: hooks.upstreamService.getModelPricing(fallback.upstream.id, fallback.model)
+      },
+      clientModel: clientModel || String(options.firstMessage?.event?.model || ""),
+      upstreamModel: fallback.model,
+      autoReviewFallbackModel: fallback.model,
+      attemptCount: 1,
+      attemptChain: []
+    };
+  } catch (error: Dynamic) {
+    hooks.upstreamService.recordRequestOutcome?.(fallback.upstream.id, {
+      status: Number(error.statusCode || 0),
+      latencyMs: Date.now() - started,
+      message: error.message
+    });
+    throw error;
+  }
 }
 function createPendingDownstreamMessages(downstream: Dynamic, signal: Dynamic, timeoutMs: Dynamic) {
   const messages: Dynamic[] = [];
@@ -513,7 +567,7 @@ function createPendingDownstreamMessages(downstream: Dynamic, signal: Dynamic, t
 }
 
 function createDeferredMessageTransformer(options: Dynamic) {
-  const { downstream, observer, hooks, target, clientModel } = options;
+  const { downstream, observer, hooks, target, clientModel, modelRewrite } = options;
   return (data: Dynamic, isBinary: Dynamic) => {
     observer.onDownstreamMessage(data, isBinary);
     if (isBinary) return undefined;
@@ -521,6 +575,9 @@ function createDeferredMessageTransformer(options: Dynamic) {
     if (event?.type !== "response.create") return undefined;
     const modelId = String(event.model || "").trim();
     if (modelId) {
+      if (modelRewrite && modelId === clientModel && target.kind === "responses_api") {
+        return Buffer.from(JSON.stringify({ ...event, model: modelRewrite }), "utf8");
+      }
       const owner = hooks.upstreamService?.findRuntimeByModel?.(modelId) || null;
       const expectedTargetId = owner?.id || "builtin-chatgpt-subscription-pool";
       if (modelId !== clientModel || expectedTargetId !== target.id) {

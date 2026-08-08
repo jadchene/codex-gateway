@@ -378,7 +378,7 @@ body {
 
 .v1-usage-segment,
 .v1-usage-pool {
-  flex: 0 0 max(var(--v1-usage-share), 260px);
+  flex: 1 1 max(var(--v1-usage-share), 260px);
   min-width: 260px;
   overflow: hidden;
 }
@@ -422,7 +422,7 @@ body {
 }
 
 .v1-usage-account {
-  flex: 0 0 max(var(--v1-usage-share), 260px);
+  flex: 1 1 max(var(--v1-usage-share), 260px);
   min-width: 260px;
   background: var(--ant-color-success-bg);
 }

@@ -456,6 +456,117 @@ test("Responses WebSocket immediately requests HTTP fallback when the first mode
   }
 });
 
+test("Responses WebSocket routes guardian review requests to an HTTP-only fallback model when the pool is exhausted", async () => {
+  let harness;
+  let upstreamUpgrades = 0;
+  harness = await startHarness({
+    hooks: {
+      upstreamService: {
+        findRuntimeByModel(modelId) {
+          if (modelId !== "deepseek-model") return null;
+          return {
+            id: "api-native",
+            name: "Native API",
+            kind: "responses_api",
+            enabled: true,
+            baseUrl: harness.settings.upstream_base_url,
+            apiKey: "api-secret",
+            supportsWebSocket: false,
+            requestHeaders: {},
+            credentialRef: "api-key-ref"
+          };
+        },
+        getModelPricing() {
+          return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 2 };
+        },
+        recordRequestOutcome() {}
+      }
+    },
+    onUpgrade() {
+      upstreamUpgrades += 1;
+    }
+  }, { auto_review_upstream_model: "deepseek-model" });
+  try {
+    for (const account of harness.accounts) account.quota_7d_used_percent = 100;
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "ws-auto-review-426" });
+    const message = nextMessage(websocket);
+    const closed = nextCloseDetail(websocket);
+    websocket.send(JSON.stringify({
+      type: "response.create",
+      model: "gpt-5.6-luna",
+      prompt_cache_key: "guardian:thread-1"
+    }));
+    const event = JSON.parse((await message).toString());
+    assert.equal(event.status, 426);
+    assert.equal(event.error.code, "WEBSOCKET_NOT_SUPPORTED");
+    assert.match(event.error.message, /deepseek-model/);
+    assert.equal((await closed).code, 1008);
+    assert.equal(upstreamUpgrades, 0);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("Responses WebSocket falls back to a WebSocket-capable model with the review model rewritten when the pool is exhausted", async () => {
+  let harness;
+  const upstreamMessages = [];
+  harness = await startHarness({
+    hooks: {
+      upstreamService: {
+        findRuntimeByModel(modelId) {
+          if (modelId !== "ws-fallback-model") return null;
+          return {
+            id: "api-native",
+            name: "Native API",
+            kind: "responses_api",
+            enabled: true,
+            baseUrl: harness.settings.upstream_base_url,
+            apiKey: "api-secret",
+            supportsWebSocket: true,
+            requestHeaders: {},
+            credentialRef: "api-key-ref"
+          };
+        },
+        getModelPricing() {
+          return { inputPerMillion: 1, cachedInputPerMillion: 0, outputPerMillion: 2 };
+        },
+        recordRequestOutcome() {}
+      }
+    },
+    onConnection(websocket) {
+      websocket.on("message", (data) => {
+        upstreamMessages.push(JSON.parse(data.toString()));
+        websocket.send(JSON.stringify({
+          type: "response.completed",
+          response: { model: "ws-fallback-model", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }
+        }));
+      });
+    }
+  }, { auto_review_upstream_model: "ws-fallback-model" });
+  try {
+    for (const account of harness.accounts) account.quota_7d_used_percent = 100;
+    const { websocket } = await connectGateway(harness, "/v1/responses", { "session-id": "ws-auto-review-fallback" });
+    const message = nextMessage(websocket);
+    websocket.send(JSON.stringify({
+      type: "response.create",
+      model: "gpt-5.6-luna",
+      prompt_cache_key: "guardian:thread-1",
+      input: "review"
+    }));
+    assert.match((await message).toString(), /response\.completed/);
+    assert.equal(upstreamMessages.length, 1);
+    assert.equal(upstreamMessages[0].type, "response.create");
+    assert.equal(upstreamMessages[0].model, "ws-fallback-model");
+    await waitFor(() => harness.tokenLogs.length > 0, 1_000);
+    assert.equal(harness.tokenLogs.at(-1).client_model, "gpt-5.6-luna");
+    assert.equal(harness.tokenLogs.at(-1).upstream_model, "ws-fallback-model");
+    websocket.close();
+    await nextClose(websocket);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("WebSocket upgrade is rejected with 426 when the configured Codex model only supports HTTP", async () => {
   let harness;
   let upstreamUpgrades = 0;
