@@ -7,6 +7,7 @@ export interface RuntimePaths {
 
 export interface ServiceStatus {
   running: boolean;
+  installed?: boolean;
   url?: string;
   command?: string;
   error?: string;

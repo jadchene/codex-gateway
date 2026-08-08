@@ -2,7 +2,8 @@ import {
   DeleteOutlined,
   EditOutlined,
   MoreOutlined,
-  PlusOutlined
+  PlusOutlined,
+  ReloadOutlined
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,6 +37,7 @@ import type {
   UpstreamModel,
   UpstreamSummary
 } from "../../../shared/contracts/upstreams";
+import { currencyName } from "../../lib/currency";
 
 interface FormValues {
   id?: string;
@@ -176,7 +178,9 @@ export const UpstreamsPage = () => {
     let secretHeaders: Record<string, string>;
     try {
       publicHeaders = parseObject(values.publicHeadersJson, "普通请求头");
-      secretHeaders = parseObject(values.secretHeadersJson, "加密请求头");
+      secretHeaders = editing && !String(values.secretHeadersJson || "").trim()
+        ? {}
+        : parseObject(values.secretHeadersJson, "加密请求头");
     } catch (error) {
       message.error(readableError(error));
       return;
@@ -198,18 +202,13 @@ export const UpstreamsPage = () => {
     await saveMutation.mutateAsync(input).catch(() => undefined);
   };
 
-  const moreItems = (upstream: UpstreamSummary): NonNullable<MenuProps["items"]> => upstream.kind === "chatgpt_subscription_pool"
-    ? [{ key: "refresh-models", label: "刷新内置模型" }]
-    : [
-      { key: "health", label: "连接检查" },
-      { key: "invoke", label: "调用测试" },
-      ...(upstream.balanceQueryType !== "none" ? [{ key: "balance", label: "刷新余额" }] : [])
-    ];
+  const moreItems = (): NonNullable<MenuProps["items"]> => [
+    { key: "health", label: "连接检查" },
+    { key: "invoke", label: "调用测试" }
+  ];
 
   const onMore = (upstream: UpstreamSummary, key: string) => {
-    if (key === "refresh-models") bundledMutation.mutate();
     if (key === "health") healthMutation.mutate(upstream.id);
-    if (key === "balance") balanceMutation.mutate(upstream.id);
     if (key === "invoke") { setInvocationUpstream(upstream); setInvocationModel(""); }
   };
 
@@ -230,7 +229,7 @@ export const UpstreamsPage = () => {
       render: (_, upstream) => <Space size={4}><Tag>HTTP</Tag>{upstream.supportsWebSocket && <Tag className="v1-ws-tag">WS</Tag>}</Space>
     },
     {
-      title: "余额 / 额度", key: "balance", width: 310,
+      title: "额度", key: "balance", width: 310,
       render: (_, upstream) => <BalanceCell upstream={upstream} />
     },
     {
@@ -241,19 +240,31 @@ export const UpstreamsPage = () => {
       </Space>
     },
     {
-      title: "操作", key: "actions", fixed: "right", width: 124,
+      title: "操作", key: "actions", fixed: "right", width: 176,
       render: (_, upstream) => <Space size={4}>
         <Tooltip title={upstream.kind === "chatgpt_subscription_pool" ? "编辑模型费率" : "编辑上游"}>
           <Button aria-label="编辑" icon={<EditOutlined />} onClick={() => void (upstream.kind === "chatgpt_subscription_pool" ? openPricing(upstream) : openEdit(upstream))} />
         </Tooltip>
+        {upstream.kind === "chatgpt_subscription_pool" && (
+          <Tooltip title="刷新内置模型">
+            <Button aria-label="刷新内置模型" loading={bundledMutation.isPending} icon={<ReloadOutlined />} onClick={() => bundledMutation.mutate()} />
+          </Tooltip>
+        )}
+        {upstream.kind === "responses_api" && upstream.balanceQueryType !== "none" && (
+          <Tooltip title="刷新余额">
+            <Button aria-label="刷新余额" loading={balanceMutation.isPending} icon={<ReloadOutlined />} onClick={() => balanceMutation.mutate(upstream.id)} />
+          </Tooltip>
+        )}
         {upstream.kind === "responses_api" && (
           <Popconfirm title={`删除“${upstream.name}”？`} onConfirm={() => deleteMutation.mutate(upstream.id)}>
             <Button danger icon={<DeleteOutlined />} aria-label="删除" />
           </Popconfirm>
         )}
-        <Dropdown menu={{ items: moreItems(upstream), onClick: ({ key }) => onMore(upstream, key) }} trigger={["click"]}>
-          <Button loading={upstream.kind === "chatgpt_subscription_pool" && bundledMutation.isPending} icon={<MoreOutlined />} aria-label="更多操作" />
-        </Dropdown>
+        {upstream.kind === "responses_api" && (
+          <Dropdown menu={{ items: moreItems(), onClick: ({ key }) => onMore(upstream, key) }} trigger={["click"]}>
+            <Button icon={<MoreOutlined />} aria-label="更多操作" />
+          </Dropdown>
+        )}
       </Space>
     }
   ];
@@ -264,7 +275,7 @@ export const UpstreamsPage = () => {
     </Flex>
     <Table
       rowKey="id" columns={columns} dataSource={upstreamsQuery.data ?? []} loading={upstreamsQuery.isLoading}
-      pagination={false} scroll={{ x: 1100 }} sticky={{ offsetHeader: 0 }}
+      pagination={false} scroll={{ x: 1120 }} sticky={{ offsetHeader: 0 }}
     />
 
     <Drawer
@@ -290,7 +301,7 @@ export const UpstreamsPage = () => {
         <Flex gap={12} wrap>
           <Form.Item name="apiKey" label={editing ? "API Key（留空保持原值）" : "API Key"} style={{ flex: "1 1 320px" }}><Input.Password /></Form.Item>
           <Form.Item name="balanceQueryType" label="余额查询方式" style={{ width: 220 }}>
-            <Select options={[{ value: "none", label: "不查询" }, { value: "deepseek", label: "DeepSeek 官方接口" }]} />
+            <Select options={[{ value: "none", label: "不查询" }, { value: "deepseek", label: "DeepSeek" }]} />
           </Form.Item>
           <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
           <Form.Item name="supportsWebSocket" label="支持 WS" valuePropName="checked"><Switch /></Form.Item>
@@ -305,12 +316,12 @@ export const UpstreamsPage = () => {
         </Flex>
 
         <Typography.Title level={5}>Codex 模型 JSON</Typography.Title>
-        <Alert showIcon type="info" title="粘贴渠道提供的 Codex models.json，用于读取模型及其支持的能力。" />
+        <Alert showIcon type="info" title="粘贴渠道提供的 Codex models.json，用于读取模型及其支持的能力。" style={{ marginBottom: 16 }} />
         <Form.Item name="modelCatalogJson" rules={[{ required: true }, { validator: validateCatalog }]}>
           <Input.TextArea className="v1-code-editor" autoSize={{ minRows: 12, maxRows: 24 }} spellCheck={false} />
         </Form.Item>
 
-        <Typography.Title level={5}>模型费率（{currency} / 百万 Token）</Typography.Title>
+        <Typography.Title level={5}>模型费率（{currencyName(currency)} / 百万 Token）</Typography.Title>
         {catalogModels.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="模型 JSON 中尚无有效模型" /> : (
           <Space orientation="vertical" size={8} style={{ width: "100%" }}>
             {catalogModels.map((model) => <div className="v1-model-price-row" key={model.slug}>
@@ -324,8 +335,22 @@ export const UpstreamsPage = () => {
 
         <Typography.Title level={5}>高级请求头</Typography.Title>
         <Flex gap={12} wrap>
-          <Form.Item name="publicHeadersJson" label="普通请求头 JSON" style={{ flex: 1 }}><Input.TextArea rows={5} className="v1-code-editor" /></Form.Item>
-          <Form.Item name="secretHeadersJson" label={editing ? "加密请求头 JSON（留空保持原值）" : "加密请求头 JSON"} style={{ flex: 1 }}><Input.TextArea rows={5} className="v1-code-editor" /></Form.Item>
+          <Form.Item
+            name="publicHeadersJson"
+            label="普通请求头 JSON"
+            rules={[{ validator: (_, value) => validateObjectJson(value, "普通请求头") }]}
+            style={{ flex: 1 }}
+          >
+            <Input.TextArea className="v1-code-editor v1-fixed-json-editor" spellCheck={false} />
+          </Form.Item>
+          <Form.Item
+            name="secretHeadersJson"
+            label={editing ? "加密请求头 JSON（留空保持原值）" : "加密请求头 JSON"}
+            rules={[{ validator: (_, value) => validateObjectJson(value, "加密请求头", Boolean(editing)) }]}
+            style={{ flex: 1 }}
+          >
+            <Input.TextArea className="v1-code-editor v1-fixed-json-editor" spellCheck={false} />
+          </Form.Item>
         </Flex>
       </Form>
     </Drawer>
@@ -349,7 +374,7 @@ export const UpstreamsPage = () => {
       okText="保存费率" confirmLoading={pricingMutation.isPending}
       onCancel={() => setPricingUpstream(null)} onOk={() => pricingForm.submit()}
     >
-      <Typography.Paragraph type="secondary">币种：{currency}；单价按每百万 Token 计算。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">币种：{currencyName(currency)}；单价按每百万 Token 计算。</Typography.Paragraph>
       <Form form={pricingForm} onFinish={(values) => pricingUpstream && pricingMutation.mutate({ id: pricingUpstream.id, pricing: values.pricing })}>
         <Space orientation="vertical" size={8} style={{ width: "100%" }}>
           {pricingModels.map((model) => <div className="v1-model-price-row" key={model.modelId}>
@@ -376,7 +401,7 @@ const BalanceCell = ({ upstream }: { upstream: UpstreamSummary }) => {
   if (upstream.balance.summary) return <Typography.Text>{upstream.balance.summary}</Typography.Text>;
   if (upstream.balance.error) return <Typography.Text type="danger" ellipsis={{ tooltip: upstream.balance.error }}>{upstream.balance.error}</Typography.Text>;
   if (upstream.balance.infos.length === 0) return <Typography.Text type="secondary">{upstream.balanceQueryType === "none" ? "未配置" : "未查询"}</Typography.Text>;
-  return <Space orientation="vertical" size={0}>{upstream.balance.infos.map((info) => <Typography.Text key={info.currency}>{info.currency} {info.totalBalance}</Typography.Text>)}</Space>;
+  return <Space orientation="vertical" size={0}>{upstream.balance.infos.map((info) => <Typography.Text key={info.currency}>{currencyName(info.currency)} {info.totalBalance}</Typography.Text>)}</Space>;
 };
 
 const PoolQuota = ({ label, total, capacity }: { label: string; total: number; capacity: number }) => (
@@ -390,7 +415,7 @@ const modelColumns = (currency: string): TableColumnsType<UpstreamModel> => [
   { title: "模型 ID", dataIndex: "modelId", width: 190, ellipsis: true, render: (value) => <Typography.Text className="v1-mono" copyable>{value}</Typography.Text> },
   { title: "显示名称", dataIndex: "displayName", width: 180, ellipsis: true },
   { title: "推理程度", width: 310, render: (_, model) => <Typography.Text className="v1-nowrap">{reasoningLevels(model.metadata).join(" / ") || "-"}</Typography.Text> },
-  { title: `费率（${currency}）`, width: 240, render: (_, model) => `${model.pricing.inputPerMillion.toFixed(4)} / ${model.pricing.cachedInputPerMillion.toFixed(4)} / ${model.pricing.outputPerMillion.toFixed(4)}` }
+  { title: `费率（${currencyName(currency)}）`, width: 240, render: (_, model) => `${model.pricing.inputPerMillion.toFixed(4)} / ${model.pricing.cachedInputPerMillion.toFixed(4)} / ${model.pricing.outputPerMillion.toFixed(4)}` }
 ];
 
 function modelEntries(raw: string): Array<{ slug: string; metadata: Record<string, unknown> }> {
@@ -403,15 +428,48 @@ function modelEntries(raw: string): Array<{ slug: string; metadata: Record<strin
 }
 
 function validateCatalog(_: unknown, value: string): Promise<void> {
-  const models = modelEntries(value);
-  if (models.length === 0) return Promise.reject(new Error("models 数组至少需要一个包含 slug 的模型"));
-  if (new Set(models.map((model) => model.slug)).size !== models.length) return Promise.reject(new Error("模型 slug 不能重复"));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(value || ""));
+  } catch {
+    return Promise.reject(new Error("模型 JSON 格式不正确"));
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return Promise.reject(new Error("模型 JSON 必须是对象"));
+  }
+  const models = (parsed as Record<string, unknown>).models;
+  if (!Array.isArray(models) || models.length === 0) {
+    return Promise.reject(new Error("模型 JSON 必须包含非空 models 数组"));
+  }
+  if (models.some((model) => !model || typeof model !== "object" || Array.isArray(model))) {
+    return Promise.reject(new Error("models 中的每一项都必须是对象"));
+  }
+  const slugs = models.map((model) => (model as Record<string, unknown>).slug);
+  if (slugs.some((slug) => typeof slug !== "string" || !slug.trim())) {
+    return Promise.reject(new Error("models 中的每一项都必须包含非空 slug"));
+  }
+  const normalizedSlugs = slugs.map((slug) => String(slug).trim());
+  if (new Set(normalizedSlugs).size !== normalizedSlugs.length) {
+    return Promise.reject(new Error("模型 slug 不能重复"));
+  }
   return Promise.resolve();
 }
 
+const validateObjectJson = (raw: unknown, label: string, allowEmpty = false): Promise<void> => {
+  const text = String(raw || "").trim();
+  if (!text && allowEmpty) return Promise.resolve();
+  if (!text) return Promise.reject(new Error(`${label}必须是 JSON 对象`));
+  try {
+    parseObject(text, label);
+    return Promise.resolve();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+};
+
 function parseObject(raw: string, label: string): Record<string, string> {
   try {
-    const value = JSON.parse(raw || "{}");
+    const value = JSON.parse(raw);
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, String(item)]));
   } catch { throw new Error(`${label}不是有效 JSON 对象`); }

@@ -14,6 +14,7 @@ import { Button, Flex, Layout, Menu, Space, Tag, Typography } from "antd";
 import type { MenuProps } from "antd";
 import type { PropsWithChildren, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import appIconUrl from "../../../../assets/app-icon.png";
 
 const { Header, Content, Sider } = Layout;
 
@@ -62,7 +63,7 @@ export const AppShell = ({
     [pages]
   );
   const title = useMemo(
-    () => pages.find((page) => page.id === activePage)?.label ?? "Codex Gateway",
+    () => pages.find((page) => page.id === activePage)?.label ?? "Codexia",
     [activePage, pages]
   );
   const description = useMemo(
@@ -84,10 +85,10 @@ export const AppShell = ({
     <Layout className="v1-shell">
       <Sider className="v1-sider" collapsed={collapsed} collapsedWidth={72} width={232} trigger={null}>
         <div className="v1-brand">
-          <div className="v1-brand-mark">CG</div>
+          <img className="v1-brand-mark" src={appIconUrl} alt="" />
           {!collapsed && (
             <div>
-              <Typography.Text strong>Codex Gateway</Typography.Text>
+              <Typography.Text strong>Codexia</Typography.Text>
               <Typography.Text type="secondary" className="v1-brand-subtitle">
                 {appVersion ? `v${appVersion}` : ""}
               </Typography.Text>

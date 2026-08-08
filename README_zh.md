@@ -1,31 +1,31 @@
-# Codex Gateway
+# Codexia
 
 [English README](README.md)
 
 ## 项目介绍
 
-Codex Gateway 是一个 Windows 桌面应用，用于在 Codex 中集中使用 ChatGPT 订阅账号和第三方模型渠道。
+Codexia 是一个 Windows 桌面应用，用于在 Codex 中集中使用 ChatGPT 订阅账号和第三方模型渠道。
 
-![Codex Gateway 概览](docs/screenshots/overview.png)
+![Codexia 概览](docs/screenshots/overview.png)
 
 ## 为什么使用
 
 - 将 ChatGPT 订阅账号转换为本地 API 服务。
 - 通过 Responses API 渠道接入第三方模型。
 - 直接在 Codex 的模型列表中轻松切换订阅模型和第三方模型。
-- 在同一个桌面应用中集成并管理可选的 MCP 网关。
+- 在同一个桌面应用中集成并管理可选的 MCP 服务。
 - 快捷查看并使用订阅账号可用的重置卡。
 - 根据各模型的输入、缓存输入和输出费率估算调用成本。
 
 ## 快速开始
 
-1. 打开 `Codex Gateway.exe`。
+1. 打开 `Codexia.exe`。
 2. 添加 ChatGPT 订阅账号、模型渠道，或同时添加两者。
-3. 打开“接入模式”并应用网关模式。
+3. 打开“接入模式”并应用 API 模式。
 4. 在“服务管理”中启动 API 服务。
 5. 回到 Codex 选择模型。
 
-网关模式可以同时使用订阅模型和第三方模型；账号模式则让 Codex 直接连接一个选中的订阅账号。
+API 模式可以同时使用订阅模型和第三方模型；账号模式则让 Codex 直接连接一个选中的订阅账号。
 
 ## 功能与设置
 
@@ -45,7 +45,7 @@ Codex Gateway 是一个 Windows 桌面应用，用于在 Codex 中集中使用 C
 
 使用渠道前，可以查看导入的模型目录并运行调用测试。
 
-“接入模式”用于将网关模式或账号直连模式应用到 Codex。应用网关模式前，还可以选择推荐的 Base URL 配置或自定义 Provider 配置。
+“接入模式”用于将 API 模式或账号模式应用到 Codex。应用 API 模式前，还可以选择推荐的 Base URL 配置或自定义 Provider 配置。
 
 ### 服务管理
 
@@ -56,8 +56,8 @@ Codex Gateway 是一个 Windows 桌面应用，用于在 Codex 中集中使用 C
 | 区域 | 可配置内容 |
 | --- | --- |
 | 常规 | 开机自启、关闭窗口时的行为、界面主题和显示密度。 |
-| 本地网关 | 监听地址、端口、本地 API Key 和服务自动启动。 |
-| MCP 集成 | 自动启动、配置文件路径、主机、端口和 HTTP 路径。 |
+| API 服务 | 监听地址、端口、访问密钥和服务自动启动。 |
+| MCP 服务 | 未安装提示、自动启动、配置文件路径、主机、端口和 HTTP 路径。 |
 | 账号与额度 | 自动刷新间隔、刷新超时、账号选择策略、额度冷却、额度显示，以及自动审查使用的可选第三方回退模型。 |
 | 日志与计费 | 调用记录保留时间、运行日志保留时间和计费币种。 |
 | 存储 | 当前数据位置，以及清空调用记录或运行日志。 |
@@ -87,7 +87,7 @@ npm run verify
 npm run pack:unpacked
 ```
 
-输出文件为 `release/win-unpacked/Codex Gateway.exe`。该程序未进行代码签名，也不包含安装器。
+输出文件为 `release/win-unpacked/Codexia.exe`。该程序未进行代码签名，也不包含安装器。
 
 ## License
 

@@ -1,31 +1,31 @@
-# Codex Gateway
+# Codexia
 
 [中文文档](README_zh.md)
 
 ## What This Project Is
 
-Codex Gateway is a Windows desktop app for using ChatGPT subscription accounts and third-party model channels from Codex in one place.
+Codexia is a Windows desktop app for using ChatGPT subscription accounts and third-party model channels from Codex in one place.
 
-![Codex Gateway overview](docs/screenshots/overview.png)
+![Codexia overview](docs/screenshots/overview.png)
 
 ## Why Use It
 
 - Turn ChatGPT subscription accounts into a local API service.
 - Connect third-party models through Responses API channels.
 - Switch easily between subscription and third-party models from the Codex model picker.
-- Integrate and manage an optional MCP Gateway from the same desktop app.
+- Integrate and manage an optional MCP service from the same desktop app.
 - Quickly view and use available Bank Reset cards for subscription accounts.
 - Estimate request costs from each model's input, cached-input, and output prices.
 
 ## Quick Start
 
-1. Open `Codex Gateway.exe`.
+1. Open `Codexia.exe`.
 2. Add a ChatGPT subscription account, a model channel, or both.
-3. Open **Integration Mode** and apply Gateway mode.
+3. Open **Integration Mode** and apply API mode.
 4. Start the API service from **Services**.
 5. Return to Codex and select a model.
 
-Gateway mode makes subscription and third-party models available together. Account mode connects Codex directly to one selected subscription account.
+API mode makes subscription and third-party models available together. Account mode connects Codex directly to one selected subscription account.
 
 ## Reference
 
@@ -45,7 +45,7 @@ Each Responses API channel supports the following settings:
 
 You can inspect the imported model catalog and test a channel before using it in Codex.
 
-The **Integration Mode** page applies either gateway or direct-account mode to Codex. Gateway mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it.
+The **Integration Mode** page applies either API or account mode to Codex. API mode also lets you choose the recommended Base URL configuration or a custom Provider configuration before applying it.
 
 ### Services
 
@@ -56,8 +56,8 @@ The **Services** page starts, stops, and restarts the local API service and the 
 | Area | Available settings |
 | --- | --- |
 | General | Launch with Windows, window-close behavior, theme, and interface density. |
-| Local gateway | Listening address, port, local API key, and automatic service start. |
-| MCP integration | Automatic start, configuration file path, host, port, and HTTP path. |
+| API service | Listening address, port, access key, and automatic service start. |
+| MCP service | Installation notice, automatic start, configuration file path, host, port, and HTTP path. |
 | Accounts and quotas | Refresh interval, refresh timeout, account-selection policy, quota cooldown, quota display, and an optional third-party fallback model for auto review. |
 | Logs and billing | Request-log retention, runtime-log retention, and billing currency. |
 | Storage | Current data location and controls for clearing request or runtime logs. |
@@ -87,7 +87,7 @@ Create the Windows unpacked build with:
 npm run pack:unpacked
 ```
 
-The output is `release/win-unpacked/Codex Gateway.exe`. It is not code-signed and does not include an installer.
+The output is `release/win-unpacked/Codexia.exe`. It is not code-signed and does not include an installer.
 
 ## License
 

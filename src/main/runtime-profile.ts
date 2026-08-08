@@ -49,12 +49,12 @@ export function createRuntimeProfile(options: {
     isolated,
     isolatedRequested,
     rejectedPackagedFlag: isolatedRequested && isPackaged,
-    appName: isolated ? "Codex Gateway v1 Dev" : "Codex Gateway",
+    appName: isolated ? "Codexia v1 Dev" : "Codexia",
     appUserModelId: isolated
-      ? "io.github.jadchene.codex-gateway.v1-dev"
-      : "io.github.jadchene.codex-gateway",
-    windowTitle: isolated ? "Codex Gateway · v1 Dev" : "Codex Gateway",
-    trayToolTip: isolated ? "Codex Gateway · v1 Dev" : "Codex Gateway",
+      ? "io.github.jadchene.codexia.v1-dev"
+      : "io.github.jadchene.codexia",
+    windowTitle: isolated ? "Codexia · v1 Dev" : "Codexia",
+    trayToolTip: isolated ? "Codexia · v1 Dev" : "Codexia",
     rendererDevOrigin: isolated ? "http://127.0.0.1:18435" : "http://127.0.0.1:8435",
     useSingleInstance: true,
     allowServiceAutoStart: true,

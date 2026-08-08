@@ -192,7 +192,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   if (!startedStartupRefreshAll) await checkStaleQuotasOnStartup();
   if (runtimeProfile.allowServiceAutoStart && store.getSettings().auto_start_gateway === "true") {
     gateway.start().then(() => {
-      store.addAppLog({ scope: "gateway", action: "auto-start", status: "success", message: "应用启动时自动启动网关" });
+      store.addAppLog({ scope: "gateway", action: "auto-start", status: "success", message: "应用启动时自动启动 API 服务" });
       updateTrayMenu();
     }).catch((error: Dynamic) => {
       store.addAppLog({ level: "error", scope: "gateway", action: "auto-start", status: "failed", message: error.message });
@@ -200,7 +200,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }
   if (runtimeProfile.allowServiceAutoStart && store.getSettings().auto_start_mcp_gateway === "true") {
     mcpGateway.start().then((status: Dynamic) => {
-      store.addAppLog({ scope: "mcp", action: "auto-start", status: "success", message: "应用启动时自动启动 MCP 网关" });
+      store.addAppLog({ scope: "mcp", action: "auto-start", status: "success", message: "应用启动时自动启动 MCP 服务" });
       notifyMcpGatewayStatus(status);
     }).catch((error: Dynamic) => {
       store.addAppLog({ level: "error", scope: "mcp", action: "auto-start", status: "failed", message: error.message });
@@ -481,7 +481,7 @@ function registerIpc() {
     modelCatalogService.refresh();
     const result = applyGatewayMode(settings, gatewayCodexOptions());
     store.saveSettings({ codex_auth_mode: "gateway", codex_selected_account_id: "" });
-    store.addAppLog({ scope: "auth", action: "apply-gateway", status: "success", message: "已写入 Codex 网关模式认证" });
+    store.addAppLog({ scope: "auth", action: "apply-gateway", status: "success", message: "已写入 Codex API 模式认证" });
     return result;
   });
   handleIpc("codexAuth:applyAccountMode", (_event, accountId) => {
@@ -555,7 +555,7 @@ async function startGateway(reason: Dynamic = "manual") {
     scope: "gateway",
     action: reason === "tray" ? "tray-start" : "start",
     status: "success",
-    message: `${reason === "tray" ? "托盘菜单启动网关" : "网关已启动"}；模型目录 ${catalog.totalCount} 个`
+    message: `${reason === "tray" ? "托盘菜单启动 API 服务" : "API 服务已启动"}；模型目录 ${catalog.totalCount} 个`
   });
   updateTrayMenu();
   notifyGatewayStatus(status);
@@ -572,7 +572,7 @@ async function stopGateway(reason: Dynamic = "manual") {
     scope: "gateway",
     action: reason === "tray" ? "tray-stop" : "stop",
     status: "success",
-    message: reason === "tray" ? "托盘菜单停止网关" : "网关已停止"
+    message: reason === "tray" ? "托盘菜单停止 API 服务" : "API 服务已停止"
   });
   updateTrayMenu();
   notifyGatewayStatus(status);
@@ -585,7 +585,7 @@ async function startMcpGateway(reason: Dynamic = "manual") {
     scope: "mcp",
     action: "start",
     status: "success",
-    message: reason === "manual" ? "MCP 网关已启动" : `${reason}: MCP 网关已启动`
+    message: reason === "manual" ? "MCP 服务已启动" : `${reason}: MCP 服务已启动`
   });
   notifyMcpGatewayStatus(status);
   return status;
@@ -597,7 +597,7 @@ async function stopMcpGateway(reason: Dynamic = "manual") {
     scope: "mcp",
     action: "stop",
     status: "success",
-    message: reason === "manual" ? "MCP 网关已停止" : `${reason}: MCP 网关已停止`
+    message: reason === "manual" ? "MCP 服务已停止" : `${reason}: MCP 服务已停止`
   });
   notifyMcpGatewayStatus(status);
   return status;
@@ -624,7 +624,7 @@ async function importLocalCodexAccount() {
     throw new Error("auth.json 不是有效的 Codex 账号模式认证，缺少 access_token 或 refresh_token。");
   }
   if (auth.OPENAI_API_KEY && !auth.auth_mode && !auth.tokens) {
-    throw new Error("当前 auth.json 是 API Key 网关模式，不是 Codex 账号模式。");
+    throw new Error("当前 auth.json 是 API 模式，不是 Codex 账号模式。");
   }
   const account: Dynamic = {
     ...accountFromTokens(tokens),
@@ -723,7 +723,7 @@ function updateTrayMenu() {
   const running = gateway.status().running;
   const menu = Menu.buildFromTemplate([
     {
-      label: running ? "停止网关" : "启动网关",
+      label: running ? "停止 API 服务" : "启动 API 服务",
       click: () => {
         const task = running ? stopGateway("tray") : startGateway("tray");
         task.catch((error) => {
@@ -770,7 +770,7 @@ function syncDetectedCodexAuthMode() {
   const message = detected.mode === "account"
     ? `启动时识别 Codex 认证模式：账号模式${account ? `（${account.email || account.name}）` : ""}`
     : detected.mode === "gateway"
-      ? "启动时识别 Codex 认证模式：网关模式"
+      ? "启动时识别 Codex 认证模式：API 模式"
       : "启动时识别 Codex 认证模式：未知";
   store.addAppLog({
     scope: "auth",
@@ -837,7 +837,7 @@ async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
           scope: "gateway",
           action: "stop",
           status: reason,
-          message: `退出时停止网关：${reason}`
+          message: `退出时停止 API 服务：${reason}`
         });
       }
     } catch (stopError: Dynamic) {
@@ -847,7 +847,7 @@ async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
           scope: "gateway",
           action: "stop",
           status: "failed",
-          message: `退出时关闭网关失败：${stopError.message}`
+          message: `退出时关闭 API 服务失败：${stopError.message}`
         });
       }
     }
@@ -861,7 +861,7 @@ async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
           scope: "mcp",
           action: "stop",
           status: reason,
-          message: `退出时停止 MCP 网关：${reason}`
+          message: `退出时停止 MCP 服务：${reason}`
         });
       }
     } catch (stopError: Dynamic) {
@@ -871,7 +871,7 @@ async function shutdownRuntime(reason: Dynamic, error?: Dynamic) {
           scope: "mcp",
           action: "stop",
           status: "failed",
-          message: `退出时关闭 MCP 网关失败：${stopError.message}`
+          message: `退出时关闭 MCP 服务失败：${stopError.message}`
         });
       }
     }
@@ -1306,7 +1306,7 @@ async function refreshGatewayAccountToken(accountId: Dynamic) {
     scope: "gateway",
     action: "refresh-token",
     status: "success",
-    message: `网关请求前刷新账号 token：${saved.email || saved.name || saved.id}`
+    message: `API 服务请求前刷新账号 token：${saved.email || saved.name || saved.id}`
   });
   return saved;
 }

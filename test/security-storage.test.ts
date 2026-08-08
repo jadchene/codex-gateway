@@ -272,9 +272,9 @@ test("gateway provider config replaces another active provider while preserving 
     gateway_port: "8436",
     codex_config_use_openai_base_url: "false"
   });
-  assert.match(custom, /^model_provider = "codex_gateway"/m);
+  assert.match(custom, /^model_provider = "codexia"/m);
   assert.match(custom, /\[model_providers\.custom\]/);
-  assert.match(custom, /\[model_providers\.codex_gateway\]/);
+  assert.match(custom, /\[model_providers\.codexia\]/);
 });
 
 test("switching gateway config to custom provider clears openai_base_url residue", () => {
@@ -285,8 +285,8 @@ test("switching gateway config to custom provider clears openai_base_url residue
     codex_config_use_openai_base_url: "false"
   });
   assert.doesNotMatch(next, /openai_base_url/);
-  assert.match(next, /^model_provider = "codex_gateway"/m);
-  assert.match(next, /\[model_providers\.codex_gateway\]/);
+  assert.match(next, /^model_provider = "codexia"/m);
+  assert.match(next, /\[model_providers\.codexia\]/);
   assert.match(next, /model_catalog_json/);
 });
 
@@ -297,7 +297,7 @@ test("switching gateway config to openai_base_url clears custom provider residue
     codex_config_use_openai_base_url: "false"
   });
   const next = nextGatewayConfig(current, { gateway_host: "localhost", gateway_port: "8436" });
-  assert.doesNotMatch(next, /codex_gateway/);
+  assert.doesNotMatch(next, /codexia|codex_gateway/);
   assert.doesNotMatch(next, /^model_provider\s*=/m);
   assert.match(next, /openai_base_url = "http:\/\/localhost:8436\/v1"/);
   assert.match(next, /model_catalog_json/);
@@ -323,10 +323,10 @@ test("withoutGatewayProvider clears simplified openai_base_url config without pr
 test("withoutGatewayProvider clears custom provider config", () => {
   const current = [
     'model = "gpt-5.4"',
-    'model_provider = "codex_gateway"',
+    'model_provider = "codexia"',
     'model_catalog_json = "C:/Users/test/.codex/models.json"',
     "",
-    "[model_providers.codex_gateway]",
+    "[model_providers.codexia]",
     'name = "OpenAI"',
     'base_url = "http://localhost:8436/v1"',
     "",
@@ -335,7 +335,7 @@ test("withoutGatewayProvider clears custom provider config", () => {
     ""
   ].join("\n");
   const next = withoutGatewayProvider(current);
-  assert.doesNotMatch(next, /codex_gateway/);
+  assert.doesNotMatch(next, /codexia/);
   assert.doesNotMatch(next, /model_catalog_json/);
   assert.match(next, /^model = "gpt-5\.4"/m);
   assert.match(next, /\[notice\.model_migrations\]/);
@@ -493,6 +493,14 @@ test("MCP process status preserves an unexpected exit error", async () => {
   child.stderr.emit("data", "configuration failed");
   child.emit("exit", 1, null);
   assert.match(service.status().error, /configuration failed/);
+  assert.equal(service.status().installed, true);
+});
+
+test("MCP process status reports a missing service executable", () => {
+  const service = createMcpGatewayService({ getSettings: () => ({}) }, {
+    resolveLaunch: () => { throw new Error("missing"); }
+  });
+  assert.equal(service.status().installed, false);
 });
 
 test("Windows npm shim resolves a scoped package entry without invoking cmd.exe", () => {

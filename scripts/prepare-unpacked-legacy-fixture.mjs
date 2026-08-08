@@ -12,7 +12,7 @@ const databasePath = path.join(dataDirectory, "codex-gateway.sqlite");
 const relativeDataPath = path.relative(unpackedRoot, dataDirectory);
 
 if (relativeDataPath !== "data") throw new Error(`Refusing to replace unexpected fixture path: ${dataDirectory}`);
-if (!fs.existsSync(path.join(unpackedRoot, "Codex Gateway.exe"))) {
+if (!fs.existsSync(path.join(unpackedRoot, "Codexia.exe"))) {
   throw new Error("Build the unpacked application before preparing its legacy fixture.");
 }
 

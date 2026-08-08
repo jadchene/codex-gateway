@@ -20,6 +20,9 @@ test("isolated development profile separates runtime state and service ports", (
   assert.equal(profile.allowServiceAutoStart, true);
   assert.equal(profile.allowStartupIntegration, false);
   assert.equal(profile.allowLiveCodexAccess, false);
+  assert.equal(profile.appName, "Codexia v1 Dev");
+  assert.equal(profile.appUserModelId, "io.github.jadchene.codexia.v1-dev");
+  assert.equal(profile.windowTitle, "Codexia · v1 Dev");
   assert.equal(profile.rendererDevOrigin, "http://127.0.0.1:18435");
   assert.equal(profile.paths.dataDir, path.join(projectRoot, ".runtime", "v1-dev"));
   assert.equal(profile.paths.browserDataDir, path.join(projectRoot, ".runtime", "v1-dev", "browser"));
@@ -34,7 +37,7 @@ test("isolated development profile separates runtime state and service ports", (
 
 test("packaged build ignores the isolated flag and keeps production single-instance behavior", () => {
   const profile = createRuntimeProfile({
-    argv: ["codex-gateway.exe", "--isolated-dev"],
+    argv: ["codexia.exe", "--isolated-dev"],
     isPackaged: true,
     projectRoot
   });
@@ -46,6 +49,9 @@ test("packaged build ignores the isolated flag and keeps production single-insta
   assert.equal(profile.allowServiceAutoStart, true);
   assert.equal(profile.allowStartupIntegration, true);
   assert.equal(profile.allowLiveCodexAccess, true);
+  assert.equal(profile.appName, "Codexia");
+  assert.equal(profile.appUserModelId, "io.github.jadchene.codexia");
+  assert.equal(profile.windowTitle, "Codexia");
   assert.equal(profile.paths, null);
 });
 

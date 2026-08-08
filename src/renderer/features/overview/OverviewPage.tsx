@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Col, Flex, List, Progress, Row, Space, Statistic, Tooltip, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { AppLog, TokenSummary } from "../../../shared/contracts/logs";
+import { currencyName } from "../../lib/currency";
 import { cacheHitRate, formatTokenNumber } from "../../lib/formatters";
 
 type SettingsRecord = Record<string, string>;
@@ -103,7 +104,7 @@ export const OverviewPage = ({
           <StatisticColumn title="缓存命中" value={cacheHitRate(total.input_tokens, total.cached_input_tokens)} precision={1} suffix="%" />
           <StatisticColumn title="平均耗时" value={Number(total.average_duration_ms || 0)} precision={0} suffix="ms" />
           <StatisticColumn title="错误" value={Number(total.errors || 0)} />
-          <StatisticColumn title={`估算成本（${settings.billing_currency || "USD"}）`} value={Number(total.estimated_cost || 0)} precision={4} />
+          <StatisticColumn title={`估算成本（${currencyName(settings.billing_currency || "USD")}）`} value={Number(total.estimated_cost || 0)} precision={4} />
         </Row>
       </Card>
 

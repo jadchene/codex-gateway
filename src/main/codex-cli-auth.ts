@@ -75,7 +75,7 @@ export function applyGatewayMode(settings: Settings, options: CodexPathOptions =
     if (readJsonSafe(authPath(options))?.OPENAI_API_KEY !== apiKey
       || !hasGatewayProvider(readText(configPath(options)))
       || !hasManagedModelCatalog(readText(configPath(options)))) {
-      throw new Error("写入后的 Codex 网关认证校验失败。");
+      throw new Error("写入后的 Codex API 模式认证校验失败。");
     }
   });
   return {
@@ -159,10 +159,10 @@ export function gatewayProviderBlock(settings: Settings, options: CodexPathOptio
     ].join("\n");
   }
   return [
-    'model_provider = "codex_gateway"',
+    'model_provider = "codexia"',
     catalog,
     "",
-    "[model_providers.codex_gateway]",
+    "[model_providers.codexia]",
     'name = "OpenAI"',
     `base_url = "${baseUrl}"`,
     'wire_api = "responses"',
@@ -179,11 +179,11 @@ export function gatewayProviderBaseHost(host: unknown): string {
 
 export function replaceGatewayProviderBlock(current: unknown, block: unknown): string {
   let next = String(current || "");
-  if (/^\s*model_provider\s*=\s*"codex_gateway"\s*$/m.test(next)) {
-    next = next.replace(/^\s*model_provider\s*=\s*"codex_gateway"\s*\r?\n?/m, "");
+  if (/^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*$/m.test(next)) {
+    next = next.replace(/^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*\r?\n?/m, "");
   }
   next = next.replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
-  next = next.replace(/\r?\n?\[model_providers\.codex_gateway\]\r?\n(?:[^\[\r\n].*\r?\n?)*/m, "\n");
+  next = next.replace(/\r?\n?\[model_providers\.(?:codexia|codex_gateway)\]\r?\n(?:[^\[\r\n].*\r?\n?)*/gm, "\n");
   next = next.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
   return insertProviderBlockIntoConfig(next, block);
 }
@@ -211,7 +211,7 @@ export function removeGatewayProviderConfig(options: CodexPathOptions = {}): boo
   const next = withoutGatewayProvider(current);
   if (next === current) return false;
   writeFilesTransaction([{ file, content: next }], () => {
-    if (hasGatewayProvider(readText(file))) throw new Error("移除 Codex Gateway Provider 后校验失败。");
+    if (hasGatewayProvider(readText(file))) throw new Error("移除 Codexia Provider 后校验失败。");
   });
   return true;
 }
@@ -223,9 +223,9 @@ export function withoutGatewayProvider(current: unknown): string {
       .replace(/^\s*openai_base_url\s*=.*\r?\n?/m, "");
   }
   next = next
-    .replace(/^\s*model_provider\s*=\s*"codex_gateway"\s*\r?\n?/m, "")
+    .replace(/^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*\r?\n?/m, "")
     .replace(/^\s*model_catalog_json\s*=.*models\.json.*\r?\n?/m, "")
-    .replace(/\r?\n?\[model_providers\.codex_gateway\]\r?\n(?:[^\[\r\n].*\r?\n?)*/m, "\n");
+    .replace(/\r?\n?\[model_providers\.(?:codexia|codex_gateway)\]\r?\n(?:[^\[\r\n].*\r?\n?)*/gm, "\n");
   next = next.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
   return next;
 }
@@ -274,8 +274,8 @@ export function repairConfigSpacing(options: CodexPathOptions = {}): boolean {
 }
 
 function hasGatewayProvider(config: string): boolean {
-  return /^\s*model_provider\s*=\s*"codex_gateway"\s*$/m.test(config)
-    || /^\s*\[model_providers\.codex_gateway\]\s*$/m.test(config)
+  return /^\s*model_provider\s*=\s*"(?:codexia|codex_gateway)"\s*$/m.test(config)
+    || /^\s*\[model_providers\.(?:codexia|codex_gateway)\]\s*$/m.test(config)
     || /^\s*openai_base_url\s*=.*$/m.test(config);
 }
 

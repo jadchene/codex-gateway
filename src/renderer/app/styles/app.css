@@ -62,17 +62,11 @@ body {
 }
 
 .v1-brand-mark {
-  display: grid;
+  display: block;
   flex: 0 0 36px;
+  width: 36px;
   height: 36px;
-  place-items: center;
-  border-radius: 11px;
-  color: #fff;
-  background: linear-gradient(145deg, #2563eb, #1d4ed8);
-  box-shadow: 0 8px 18px rgb(37 99 235 / 24%);
-  font-size: 13px;
-  font-weight: 750;
-  letter-spacing: -0.02em;
+  object-fit: contain;
 }
 
 .v1-brand-subtitle {
@@ -263,6 +257,10 @@ body {
   background: var(--ant-color-bg-container);
 }
 
+.v1-analytics-section-title.ant-typography {
+  margin: 0 0 10px;
+}
+
 .v1-analytics-metric {
   position: relative;
   min-width: 0;
@@ -337,13 +335,15 @@ body {
   line-height: 1.6;
 }
 
-.v1-usage-section {
-  margin-bottom: 20px;
+.v1-fixed-json-editor {
+  height: 128px !important;
+  min-height: 128px !important;
+  max-height: 128px !important;
+  resize: none !important;
 }
 
-.v1-usage-section > .ant-typography {
-  display: block;
-  margin-bottom: 10px;
+.v1-usage-section {
+  margin-bottom: 20px;
 }
 
 .v1-usage-viewport {

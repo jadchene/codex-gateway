@@ -60,7 +60,7 @@ it("refreshes the quota summary after the five-hour limit setting changes", asyn
   await user.click(screen.getByRole("switch"));
   await user.click(screen.getByRole("button", { name: /保存设置/ }));
   await waitFor(() => expect(quotaSummary).toHaveBeenCalledOnce());
-  expect(screen.getByRole("status").textContent).toContain("配置已保存，请重启网关使配置生效");
+  expect(screen.getByRole("status").textContent).toContain("配置已保存，请重启相关服务使配置生效");
 
   await user.click(screen.getByText("运行概览"));
   expect(await screen.findByText("170.0%")).toBeTruthy();

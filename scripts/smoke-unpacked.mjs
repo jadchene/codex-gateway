@@ -14,13 +14,13 @@ const sourceUnpackedRoot = path.join(projectRoot, "release", "win-unpacked");
 const smokeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-packaged-smoke-"));
 const unpackedRoot = path.join(smokeRoot, "win-unpacked");
 const smokeHome = path.join(smokeRoot, "home");
-if (!fs.existsSync(path.join(sourceUnpackedRoot, "Codex Gateway.exe"))) {
-  throw new Error(`Missing unpacked executable: ${path.join(sourceUnpackedRoot, "Codex Gateway.exe")}`);
+if (!fs.existsSync(path.join(sourceUnpackedRoot, "Codexia.exe"))) {
+  throw new Error(`Missing unpacked executable: ${path.join(sourceUnpackedRoot, "Codexia.exe")}`);
 }
 fs.cpSync(sourceUnpackedRoot, unpackedRoot, { recursive: true });
 fs.mkdirSync(smokeHome, { recursive: true });
 process.once("exit", cleanupSmokeRoot);
-const executable = path.join(unpackedRoot, "Codex Gateway.exe");
+const executable = path.join(unpackedRoot, "Codexia.exe");
 const database = path.join(unpackedRoot, "data", "codex-gateway.sqlite");
 const screenshotArgument = process.argv.find((argument) => argument.startsWith("--screenshot="));
 const screenshotPath = screenshotArgument ? path.resolve(projectRoot, screenshotArgument.slice("--screenshot=".length)) : null;
@@ -87,9 +87,9 @@ async function inspectRenderer(webSocketDebuggerUrl) {
 
 if (!inspection?.bridgeReady) throw new Error("Packaged preload bridge was not exposed.");
 if (inspection.rootChildCount < 1) throw new Error("Packaged renderer did not mount its React root.");
-if (inspection.title !== "Codex Gateway") throw new Error(`Unexpected packaged page title: ${inspection.title}`);
+if (inspection.title !== "Codexia") throw new Error(`Unexpected packaged page title: ${inspection.title}`);
 if (inspection.gatewayRunning || inspection.mcpGatewayRunning) {
-  throw new Error("Fresh packaged data unexpectedly auto-started Gateway or MCP Gateway.");
+  throw new Error("Fresh packaged data unexpectedly auto-started the API or MCP service.");
 }
 if (inspection.gatewayKeyExposed) throw new Error("Gateway API key crossed the packaged renderer boundary.");
 if (Math.abs(inspection.rootHeight - inspection.viewportHeight) > 2
@@ -146,7 +146,7 @@ async function waitForPage(port, processHandle) {
       const response = await fetch(endpoint);
       const targets = await response.json();
       const page = targets.find((target) => target.type === "page" && target.webSocketDebuggerUrl);
-      if (page?.title === "Codex Gateway" && page.url?.endsWith("/dist/renderer/index.html")) return page;
+      if (page?.title === "Codexia" && page.url?.endsWith("/dist/renderer/index.html")) return page;
     } catch (error) {
       lastError = error;
     }

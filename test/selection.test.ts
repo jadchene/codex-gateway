@@ -813,7 +813,7 @@ test("gatewayProviderBlock keeps custom provider when simplified config is disab
     { gateway_host: "localhost", gateway_port: "8436", codex_config_use_openai_base_url: "false" },
     { modelCatalogPath: "C:/data/models.json" }
   );
-  assert.match(block, /^model_provider = "codex_gateway"/m);
+  assert.match(block, /^model_provider = "codexia"/m);
   assert.match(block, /name = "OpenAI"/);
   assert.match(block, /wire_api = "responses"/);
   assert.match(block, /supports_websockets = true/);
@@ -901,10 +901,11 @@ test("replaceGatewayProviderBlock repairs existing provider name", () => {
     gateway_port: "8436",
     codex_config_use_openai_base_url: "false"
   }));
-  assert.equal((next.match(/\[model_providers\.codex_gateway\]/g) || []).length, 1);
+  assert.equal((next.match(/\[model_providers\.codexia\]/g) || []).length, 1);
+  assert.doesNotMatch(next, /\[model_providers\.codex_gateway\]/);
   assert.match(next, /name = "OpenAI"/);
   assert.doesNotMatch(next, /name = "Codex Gateway"/);
-  assert.ok(next.indexOf('model_provider = "codex_gateway"') < next.indexOf("[notice.model_migrations]"));
+  assert.ok(next.indexOf('model_provider = "codexia"') < next.indexOf("[notice.model_migrations]"));
 });
 
 test("default openai_base_url config replaces a legacy codex_gateway provider block", () => {

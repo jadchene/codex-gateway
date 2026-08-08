@@ -167,7 +167,7 @@ function createGateway(store: Dynamic, authService: Dynamic, hooks: Dynamic = {}
         scope: "gateway",
         action: "stop",
         status: "forced",
-        message: `网关停机宽限期结束，强制关闭 ${forcedSocketCount} 个残留连接。`
+        message: `API 服务停机宽限期结束，强制关闭 ${forcedSocketCount} 个残留连接。`
       });
     }
     state = { running: false, url: "", error: "" };
@@ -653,7 +653,7 @@ function selectInitialGatewayAccount(store: Dynamic, settings: Dynamic, now = ne
       scope: "gateway",
       action: "daily-rebalance",
       status: "success",
-      message: `当天首次网关请求按 7 天剩余额度选择账号：${account.email || account.name || account.id}`
+      message: `当天首次 API 服务请求按 7 天剩余额度选择账号：${account.email || account.name || account.id}`
     });
   }
   return account;
@@ -887,10 +887,10 @@ function setCodexQuotaHeaders(res: Dynamic, headers: Dynamic) {
 }
 
 async function handleAuthCallback(parsedUrl: Dynamic, res: Dynamic, authService: Dynamic) {
-  if (!authService) return sendHtml(res, 500, "Codex Gateway", "登录服务未初始化。");
+  if (!authService) return sendHtml(res, 500, "Codexia", "登录服务未初始化。");
   try {
     await authService.completeCallback(parsedUrl.searchParams);
-    return sendHtml(res, 200, "登录成功", "账号已保存，可以关闭这个浏览器页面并回到 Codex Gateway。");
+    return sendHtml(res, 200, "登录成功", "账号已保存，可以关闭这个浏览器页面并回到 Codexia。");
   } catch (error: Dynamic) {
     return sendHtml(res, 500, "登录失败", String(error?.message || error));
   }

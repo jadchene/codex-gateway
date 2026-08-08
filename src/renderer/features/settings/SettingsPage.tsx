@@ -20,12 +20,14 @@ import { CopyOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { applyAppearancePreferences, appearanceFromSettings } from "../../app/appearance";
+import { CURRENCY_OPTIONS } from "../../lib/currency";
 
 type SettingsRecord = Record<string, string>;
 
 interface SettingsPageProps {
   settings: SettingsRecord;
   paths: { dataDir?: string; dbPath?: string };
+  mcpInstalled?: boolean | undefined;
   onSave: (settings: SettingsRecord) => Promise<unknown>;
   onMessage: (message: string) => void;
   onClearTokenLogs: () => Promise<void>;
@@ -70,6 +72,7 @@ const MIB_FIELDS: Record<string, string> = {
 export const SettingsPage = ({
   settings,
   paths,
+  mcpInstalled,
   onSave,
   onMessage,
   onClearTokenLogs,
@@ -180,7 +183,7 @@ export const SettingsPage = ({
   );
 
   const gatewayTab = (
-    <SettingsSection title="本地监听" description="设置 Codex Gateway 的监听地址和访问密钥。">
+    <SettingsSection title="服务监听" description="设置 API 服务的监听地址和访问密钥。">
         <div className="v1-settings-grid v1-settings-grid-2">
           <Form.Item name="gateway_host" label="监听地址" rules={[{ required: true }]}>
             <Input placeholder="127.0.0.1" />
@@ -199,7 +202,7 @@ export const SettingsPage = ({
           )}
         </Form.Item>
         <Form.Item
-          label="更换本地 API Key"
+          label="更换访问密钥"
           extra={settings.gateway_api_key_configured === "true"
             ? "已设置。留空会保留当前密钥。"
             : "尚未设置，请生成或输入一个新密钥。"}
@@ -209,16 +212,16 @@ export const SettingsPage = ({
               <Input.Password autoComplete="new-password" placeholder="留空保留现有密钥" />
             </Form.Item>
             <Button
-              aria-label="重新生成本地 API Key"
+              aria-label="重新生成访问密钥"
               icon={<ReloadOutlined />}
               onClick={() => form.setFieldValue("gateway_api_key", generateApiKey())}
             />
-            <Button aria-label="复制本地 API Key" icon={<CopyOutlined />} onClick={copyGatewayKey} />
+            <Button aria-label="复制访问密钥" icon={<CopyOutlined />} onClick={copyGatewayKey} />
           </Space.Compact>
         </Form.Item>
         <Flex align="center" justify="space-between" className="v1-setting-switch-row">
           <div>
-            <Typography.Text strong>自动启动 Codex Gateway</Typography.Text>
+            <Typography.Text strong>自动启动 API 服务</Typography.Text>
             <Typography.Text type="secondary" className="v1-block">打开应用时自动启动服务。</Typography.Text>
           </div>
           <Form.Item name="auto_start_gateway_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
@@ -281,18 +284,25 @@ export const SettingsPage = ({
           <NumberField name="app_log_retention_days" label="运行日志保留" suffix="天" min={1} max={3650} />
         </div>
       </SettingsSection>
-      <SettingsSection title="计费币种" description="设置模型费率和费用统计使用的币种。">
+      <SettingsSection title="计费币种" description="设置费用统计和界面展示使用的币种。">
         <Form.Item name="billing_currency" label="全局币种" style={{ maxWidth: 260 }}>
-          <Select options={["USD", "CNY", "EUR", "JPY"].map((value) => ({ value, label: value }))} />
+          <Select options={CURRENCY_OPTIONS} />
         </Form.Item>
       </SettingsSection>
     </Space>
   );
 
   const mcpTab = (
-    <SettingsSection title="MCP Gateway" description="设置 MCP Gateway 的地址和启动方式。">
+    <SettingsSection title="MCP 服务" description="设置 MCP 服务的地址和启动方式。">
+      {mcpInstalled === false && (
+        <Alert
+          showIcon
+          type="warning"
+          title="未检测到 MCP 服务，请先安装 mcp-gateway-service。"
+        />
+      )}
       <Flex align="center" justify="space-between" className="v1-setting-switch-row">
-        <Typography.Text strong>自动启动 MCP Gateway</Typography.Text>
+        <Typography.Text strong>自动启动 MCP 服务</Typography.Text>
         <Form.Item name="auto_start_mcp_gateway_enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
       </Flex>
       <Form.Item name="mcp_gateway_config_path" label="配置文件路径"><Input /></Form.Item>
@@ -413,8 +423,8 @@ export const SettingsPage = ({
 
 const SETTINGS_SECTIONS = [
   { key: "general", label: "常规" },
-  { key: "gateway", label: "本地网关" },
-  { key: "mcp", label: "MCP 集成" },
+  { key: "gateway", label: "API 服务" },
+  { key: "mcp", label: "MCP 服务" },
   { key: "quota", label: "账号与额度" },
   { key: "logs", label: "日志与计费" },
   { key: "storage", label: "存储与维护" },

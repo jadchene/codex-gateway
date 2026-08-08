@@ -75,11 +75,11 @@ export function createAuthService(
   async function handleLoginServerRequest(req: http.IncomingMessage, res: ServerResponse): Promise<void> {
     const parsedUrl = new URL(req.url || "/", loginRedirectUri());
     if (req.method !== "GET" || parsedUrl.pathname !== "/auth/callback") {
-      return sendHtml(res, 404, "Codex Gateway", "未找到登录回调地址。");
+      return sendHtml(res, 404, "Codexia", "未找到登录回调地址。");
     }
     try {
       await completeCallback(parsedUrl.searchParams);
-      return sendHtml(res, 200, "登录成功", "账号已保存，可以关闭这个浏览器页面并回到 Codex Gateway。");
+      return sendHtml(res, 200, "登录成功", "账号已保存，可以关闭这个浏览器页面并回到 Codexia。");
     } catch (error) {
       return sendHtml(res, 500, "登录失败", errorMessage(error));
     }

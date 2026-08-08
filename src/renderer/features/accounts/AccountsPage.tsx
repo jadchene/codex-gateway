@@ -1,8 +1,10 @@
 import {
+  CheckCircleOutlined,
   DeleteOutlined,
+  EyeOutlined,
   ImportOutlined,
   LoginOutlined,
-  MoreOutlined,
+  PauseCircleOutlined,
   PlusOutlined,
   ReloadOutlined
 } from "@ant-design/icons";
@@ -12,7 +14,6 @@ import {
   Col,
   Descriptions,
   Drawer,
-  Dropdown,
   Empty,
   Flex,
   Modal,
@@ -23,9 +24,10 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   Typography
 } from "antd";
-import type { MenuProps, TableColumnsType } from "antd";
+import type { TableColumnsType } from "antd";
 import { useMemo, useState } from "react";
 import type { ConsumeResetCreditResult, PublicAccount, ResetCredit } from "../../../shared/contracts/accounts";
 import type { Settings } from "../../../shared/contracts/settings";
@@ -78,25 +80,6 @@ export const AccountsPage = ({
     setAddOpen(false);
     await action();
   };
-
-  const accountActions = (account: PublicAccount): MenuProps["items"] => [
-    {
-      key: "refresh",
-      label: retryIds.has(account.id) ? "重试刷新" : "刷新额度",
-      disabled: refreshingIds.has(account.id),
-      onClick: () => onRefreshUsage(account)
-    },
-    {
-      key: "toggle",
-      label: account.enabled ? "停用账号" : "启用账号",
-      onClick: () => onSetEnabled(account, !account.enabled)
-    },
-    {
-      key: "details",
-      label: "查看详情",
-      onClick: () => setDetailAccount(account)
-    }
-  ];
 
   const columns: TableColumnsType<PublicAccount> = [
     {
@@ -151,9 +134,28 @@ export const AccountsPage = ({
       title: "操作",
       key: "actions",
       fixed: "right",
-      width: 124,
+      width: 176,
       render: (_, account) => (
         <Space size={4}>
+          <Tooltip title={retryIds.has(account.id) ? "重试刷新" : "刷新额度"}>
+            <Button
+              aria-label={retryIds.has(account.id) ? "重试刷新" : "刷新额度"}
+              icon={<ReloadOutlined />}
+              loading={refreshingIds.has(account.id)}
+              disabled={refreshingIds.has(account.id)}
+              onClick={() => onRefreshUsage(account)}
+            />
+          </Tooltip>
+          <Tooltip title={account.enabled ? "停用账号" : "启用账号"}>
+            <Button
+              aria-label={account.enabled ? "停用账号" : "启用账号"}
+              icon={account.enabled ? <PauseCircleOutlined /> : <CheckCircleOutlined />}
+              onClick={() => onSetEnabled(account, !account.enabled)}
+            />
+          </Tooltip>
+          <Tooltip title="查看详情">
+            <Button aria-label="查看详情" icon={<EyeOutlined />} onClick={() => setDetailAccount(account)} />
+          </Tooltip>
           <Popconfirm
             title="删除这个账号？"
             description="删除后需要重新完成浏览器授权。"
@@ -162,9 +164,6 @@ export const AccountsPage = ({
           >
             <Button aria-label="删除账号" danger icon={<DeleteOutlined />} />
           </Popconfirm>
-          <Dropdown menu={{ items: accountActions(account) ?? [] }} trigger={["click"]}>
-            <Button aria-label="更多账号操作" icon={<MoreOutlined />} />
-          </Dropdown>
         </Space>
       )
     }
@@ -219,6 +218,7 @@ export const AccountsPage = ({
         {detailAccount && <Descriptions bordered column={1} size="small" items={[
           { key: "identity", label: "账号", children: detailAccount.email || detailAccount.id },
           { key: "plan", label: "套餐", children: detailAccount.subscription_plan || "未知" },
+          { key: "subscriptionExpiry", label: "订阅到期", children: formatTime(detailAccount.subscription_expires_at, "未知") },
           { key: "state", label: "状态", children: detailAccount.enabled ? "启用" : "停用" },
           { key: "refresh", label: "最近刷新", children: detailAccount.last_refresh ? new Date(detailAccount.last_refresh).toLocaleString() : "暂无" },
           {

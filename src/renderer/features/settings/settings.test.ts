@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import {
@@ -12,6 +12,7 @@ import { formToSettings, SettingsPage, settingsToForm } from "./SettingsPage";
 
 describe("settings appearance and display units", () => {
   beforeEach(() => localStorage.clear());
+  afterEach(() => cleanup());
 
   it("persists normalized theme and density while notifying the provider", () => {
     const listener = vi.fn();
@@ -147,6 +148,8 @@ describe("settings appearance and display units", () => {
       }));
 
     expect(screen.getByRole("menuitem", { name: "常规" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "API 服务" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "MCP 服务" })).toBeTruthy();
     expect(screen.getByText("应用行为")).toBeTruthy();
     expect(screen.getByText("外观")).toBeTruthy();
     expect(screen.getByText("延迟启动")).toBeTruthy();
@@ -159,10 +162,35 @@ describe("settings appearance and display units", () => {
     await user.click(screen.getByRole("menuitem", { name: "高级网络" }));
     expect(screen.getByText("超时与并发")).toBeTruthy();
     expect(screen.getAllByRole("menuitem")).toHaveLength(7);
+    await user.click(screen.getByRole("menuitem", { name: "日志与计费" }));
+    expect(screen.getByText("设置费用统计和界面展示使用的币种。")).toBeTruthy();
+    await user.click(screen.getByRole("combobox", { name: "全局币种" }));
+    expect(screen.getByText("美元（USD）")).toBeTruthy();
+    expect(screen.getByText("人民币（CNY）")).toBeTruthy();
     await user.click(screen.getByRole("menuitem", { name: "常规" }));
     await user.click(screen.getByText("深色"));
     expect(screen.getByRole("button", { name: /保存设置/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "放弃更改" }));
     expect(screen.queryByRole("button", { name: /保存设置/ })).toBeNull();
+  });
+
+  it("shows a concise notice when the MCP service is not installed", async () => {
+    const user = userEvent.setup();
+    render(createElement(SettingsPage, {
+      settings: {
+        auto_start_gateway: "false",
+        auto_start_mcp_gateway: "false",
+        ignore_five_hour_limit: "false"
+      },
+      paths: {},
+      mcpInstalled: false,
+      onSave: vi.fn(),
+      onMessage: vi.fn(),
+      onClearTokenLogs: vi.fn(),
+      onClearAppLogs: vi.fn()
+    }));
+
+    await user.click(screen.getByRole("menuitem", { name: "MCP 服务" }));
+    expect(screen.getByText("未检测到 MCP 服务，请先安装 mcp-gateway-service。")).toBeTruthy();
   });
 });

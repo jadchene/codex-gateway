@@ -7,6 +7,7 @@ const MCP_GATEWAY_COMMAND = "mcp-gateway-service";
 
 interface McpState {
   running: boolean;
+  installed: boolean;
   url: string;
   error: string;
   pid: number;
@@ -31,7 +32,18 @@ export function createMcpGatewayService(store: SettingsStore, hooks: McpHooks = 
     if (stopPromise) await stopPromise;
     if (child) return state;
     const settings = store.getSettings();
-    const launch = hooks.resolveLaunch?.() || resolveMcpGatewayLaunch();
+    let launch: Launch;
+    try {
+      launch = hooks.resolveLaunch?.() || resolveMcpGatewayLaunch();
+    } catch (error) {
+      state = {
+        ...stoppedState(settings),
+        installed: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+      hooks.onStatusChanged?.(state);
+      throw error;
+    }
     const args = mcpGatewayArgs(settings);
     const command = buildMcpGatewayCommand(settings);
     const output: string[] = [];
@@ -45,6 +57,7 @@ export function createMcpGatewayService(store: SettingsStore, hooks: McpHooks = 
     spawned.stderr?.on("data", (chunk: Buffer) => collectOutput(output, chunk));
     state = {
       running: true,
+      installed: true,
       url: mcpGatewayUrl(settings),
       error: "",
       pid: spawned.pid || 0,
@@ -54,16 +67,16 @@ export function createMcpGatewayService(store: SettingsStore, hooks: McpHooks = 
       if (child !== spawned) return;
       child = null;
       state = expectedStops.has(spawned)
-        ? stoppedState(settings)
-        : { ...stoppedState(settings), error: error.message };
+        ? stoppedState(settings, true)
+        : { ...stoppedState(settings, true), error: error.message };
       hooks.onStatusChanged?.(state);
     });
     spawned.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
       if (child !== spawned) return;
       child = null;
       state = expectedStops.has(spawned)
-        ? stoppedState(settings)
-        : { ...stoppedState(settings), error: exitMessage(code, signal, output) };
+        ? stoppedState(settings, true)
+        : { ...stoppedState(settings, true), error: exitMessage(code, signal, output) };
       hooks.onStatusChanged?.(state);
     });
     return state;
@@ -72,7 +85,7 @@ export function createMcpGatewayService(store: SettingsStore, hooks: McpHooks = 
   async function stop(): Promise<McpState> {
     const settings = store.getSettings();
     if (!child) {
-      state = stoppedState(settings);
+      state = stoppedState(settings, canResolveLaunch(hooks.resolveLaunch));
       return state;
     }
     if (stopPromise) return stopPromise;
@@ -84,7 +97,7 @@ export function createMcpGatewayService(store: SettingsStore, hooks: McpHooks = 
         if (settled) return;
         settled = true;
         if (child === closing) child = null;
-        if (!child) state = stoppedState(settings);
+        if (!child) state = stoppedState(settings, true);
         resolve(state);
       };
       closing.once("exit", finish);
@@ -101,10 +114,26 @@ export function createMcpGatewayService(store: SettingsStore, hooks: McpHooks = 
     const settings = store.getSettings();
     return child
       ? state
-      : { ...state, running: false, url: "", pid: 0, command: buildMcpGatewayCommand(settings) };
+      : {
+          ...state,
+          running: false,
+          installed: canResolveLaunch(hooks.resolveLaunch),
+          url: "",
+          pid: 0,
+          command: buildMcpGatewayCommand(settings)
+        };
   }
 
   return { start, stop, status };
+}
+
+function canResolveLaunch(resolveLaunch?: () => Launch): boolean {
+  try {
+    (resolveLaunch || resolveMcpGatewayLaunch)();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function resolveMcpGatewayLaunch(): Launch {
@@ -142,9 +171,10 @@ function whereWindows(command: string): string[] {
   }).split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 }
 
-function stoppedState(settings: Settings = {}): McpState {
+function stoppedState(settings: Settings = {}, installed = false): McpState {
   return {
     running: false,
+    installed,
     url: "",
     error: "",
     pid: 0,

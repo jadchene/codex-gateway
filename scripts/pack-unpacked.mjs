@@ -31,7 +31,7 @@ fs.mkdirSync(releaseRoot, { recursive: true });
 fs.cpSync(electronDist, outputDir, { recursive: true });
 
 const sourceExecutable = path.join(outputDir, path.basename(electronExecutable));
-const targetExecutable = path.join(outputDir, "Codex Gateway.exe");
+const targetExecutable = path.join(outputDir, "Codexia.exe");
 fs.renameSync(sourceExecutable, targetExecutable);
 await rcedit(targetExecutable, {
   icon: iconPath,
@@ -39,10 +39,10 @@ await rcedit(targetExecutable, {
   "product-version": manifest.version,
   "version-string": {
     CompanyName: manifest.author,
-    FileDescription: "Codex Gateway",
-    InternalName: "Codex Gateway",
-    OriginalFilename: "Codex Gateway.exe",
-    ProductName: "Codex Gateway"
+    FileDescription: "Codexia",
+    InternalName: "Codexia",
+    OriginalFilename: "Codexia.exe",
+    ProductName: "Codexia"
   }
 });
 

@@ -22,10 +22,10 @@ const pages = [
   { id: "accounts", label: "订阅账号", description: "添加和管理用于 Codex 的 ChatGPT 订阅账号。" },
   { id: "upstreams", label: "模型渠道", description: "管理订阅账号池和第三方模型，并设置连接方式与模型费率。" },
   { id: "services", label: "服务管理", description: "启动、停止或重启本地 API 与 MCP 服务。" },
-  { id: "codexIntegration", label: "接入模式", description: "选择 Codex 使用本地网关，或直接使用一个订阅账号。" },
+  { id: "codexIntegration", label: "接入模式", description: "选择 Codex 使用本地 API 服务，或直接使用一个订阅账号。" },
   { id: "analytics", label: "调用分析", description: "按渠道、模型和账号查看调用量、Token、耗时与费用。" },
-  { id: "runtimeLogs", label: "运行日志", description: "查看网关运行记录和错误信息。" },
-  { id: "settings", label: "设置中心", description: "调整应用、网关、额度、日志和外观设置。" }
+  { id: "runtimeLogs", label: "运行日志", description: "查看服务运行记录和错误信息。" },
+  { id: "settings", label: "设置中心", description: "调整应用、API 服务、MCP 服务、额度、日志和外观设置。" }
 ];
 
 function App() {
@@ -193,7 +193,7 @@ function App() {
       const restartRequired = (gateway.running || mcpGateway.running) && Object.entries(next).some(
         ([key, value]) => value !== settings[key] && !key.startsWith("appearance_") && key !== "navigation_collapsed"
       );
-      const restartReminder = restartRequired ? "，请重启网关使配置生效" : "";
+      const restartReminder = restartRequired ? "，请重启相关服务使配置生效" : "";
       const saved = await api.saveSettings(next);
       setSettings(saved);
       applyAppearancePreferences(appearanceFromSettings(saved));
@@ -299,9 +299,9 @@ function App() {
     try {
       const next = gateway.running ? await api.stopGateway() : await api.startGateway();
       setGateway(next);
-      setMessage(next.running ? "网关已启动" : "网关已停止");
+      setMessage(next.running ? "API 服务已启动" : "API 服务已停止");
     } catch (error) {
-      setMessage(`网关操作失败：${errorMessage(error)}`);
+      setMessage(`API 服务操作失败：${errorMessage(error)}`);
     }
   }
 
@@ -309,9 +309,9 @@ function App() {
     try {
       const next = mcpGateway.running ? await api.stopMcpGateway() : await api.startMcpGateway();
       setMcpGateway(next);
-      setMessage(next.running ? "MCP 网关已启动" : "MCP 网关已停止");
+      setMessage(next.running ? "MCP 服务已启动" : "MCP 服务已停止");
     } catch (error) {
-      setMessage(`MCP 网关操作失败：${errorMessage(error)}`);
+      setMessage(`MCP 服务操作失败：${errorMessage(error)}`);
     }
   }
 
@@ -320,9 +320,9 @@ function App() {
       await api.stopGateway();
       const next = await api.startGateway();
       setGateway(next);
-      setMessage("网关已重启");
+      setMessage("API 服务已重启");
     } catch (error) {
-      setMessage(`网关重启失败：${errorMessage(error)}`);
+      setMessage(`API 服务重启失败：${errorMessage(error)}`);
     }
   }
 
@@ -331,9 +331,9 @@ function App() {
       await api.stopMcpGateway();
       const next = await api.startMcpGateway();
       setMcpGateway(next);
-      setMessage("MCP 网关已重启");
+      setMessage("MCP 服务已重启");
     } catch (error) {
-      setMessage(`MCP 网关重启失败：${errorMessage(error)}`);
+      setMessage(`MCP 服务重启失败：${errorMessage(error)}`);
     }
   }
 
@@ -444,7 +444,7 @@ function App() {
             onApplyGateway={async () => {
               const result = await api.applyGatewayAuth();
               await reload();
-              setMessage(result.providerChanged ? "已应用网关模式" : "已更新网关模式");
+              setMessage(result.providerChanged ? "已应用 API 模式" : "已更新 API 模式");
             }}
             onApplyAccount={async (accountId) => {
               const result = await api.applyAccountAuth(accountId);
@@ -471,6 +471,7 @@ function App() {
           <SettingsPage
             settings={settings}
             paths={paths}
+            mcpInstalled={mcpGateway.installed}
             onSave={saveSettings}
             onMessage={setMessage}
             onClearTokenLogs={clearTokenLogs}

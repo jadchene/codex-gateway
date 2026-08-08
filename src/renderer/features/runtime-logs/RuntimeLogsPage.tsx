@@ -45,10 +45,10 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
       width: 76,
       render: (value: string) => <Tag color={levelColor(value)}>{String(value || "info").toUpperCase()}</Tag>
     },
-    { title: "模块", dataIndex: "scope", width: 150, ellipsis: true, render: (value) => value || "-" },
+    { title: "模块", dataIndex: "scope", width: 110, ellipsis: true, render: (value) => scopeLabel(value) },
     { title: "动作", dataIndex: "action", width: 150, ellipsis: true, render: (value) => value || "-" },
     { title: "状态", dataIndex: "status", width: 130, ellipsis: true, render: (value) => value ? <Tag>{value}</Tag> : "-" },
-    { title: "消息", dataIndex: "message", width: 520, ellipsis: true, render: (value) => value || "-" }
+    { title: "消息", dataIndex: "message", width: 560, ellipsis: true, render: (value) => value || "-" }
   ];
 
   return (
@@ -133,7 +133,7 @@ export const RuntimeLogsPage = ({ pageData, paused, newLogCount, onPausedChange,
             <Descriptions bordered column={1} size="small" items={[
               { key: "time", label: "时间", children: formatTime(selectedLog.created_at) },
               { key: "level", label: "级别", children: <Tag color={levelColor(selectedLog.level)}>{selectedLog.level.toUpperCase()}</Tag> },
-              { key: "scope", label: "模块", children: selectedLog.scope || "-" },
+              { key: "scope", label: "模块", children: scopeLabel(selectedLog.scope) },
               { key: "action", label: "动作", children: selectedLog.action || "-" },
               { key: "status", label: "状态", children: selectedLog.status || "-" }
             ]} />
@@ -151,4 +151,17 @@ const levelColor = (level: unknown): string => {
   if (value === "warn" || value === "warning") return "warning";
   if (value === "debug") return "default";
   return "processing";
+};
+
+const scopeLabel = (scope: unknown): string => {
+  const value = String(scope || "");
+  const labels: Record<string, string> = {
+    gateway: "api",
+    "gateway-http": "api-http",
+    "gateway-websocket": "api-ws",
+    upstream: "channels",
+    usage: "usage",
+    "v1-dev": "dev"
+  };
+  return labels[value] || value || "-";
 };

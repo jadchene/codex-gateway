@@ -26,6 +26,7 @@ import { useState } from "react";
 import type { PublicAccount } from "../../../shared/contracts/accounts";
 import type { RequestLog, RequestLogPage, TokenAccountSummary, TokenSummary, TokenTotals } from "../../../shared/contracts/logs";
 import type { Settings } from "../../../shared/contracts/settings";
+import { currencyName } from "../../lib/currency";
 import {
   cacheHitRate,
   formatTime,
@@ -95,9 +96,13 @@ export const RequestAnalyticsPage = ({
   };
 
   const currency = settings.billing_currency || "USD";
+  const currencyLabel = currencyName(currency);
   const accountUsage = summary.byAccount.filter((item) => Boolean(item.account_id));
   const upstreamUsage = summary.byAccount.filter((item) => !item.account_id);
   const accountPoolUsage = sumTokenUsage(accountUsage);
+  const accountPoolName = upstreamQuery.data?.find((item) => item.kind === "chatgpt_subscription_pool")?.name
+    || accountUsage.find((item) => item.upstream_name)?.upstream_name
+    || "ChatGPT 订阅账号池";
   const breakdownTotal = upstreamUsage.reduce((total, item) => total + Number(item.total_tokens || 0), Number(accountPoolUsage.total_tokens || 0));
   const allColumns: TableColumnsType<RequestLog> = [
     { key: "time", title: "时间", dataIndex: "created_at", width: 160, render: (value) => formatTime(value) },
@@ -105,11 +110,12 @@ export const RequestAnalyticsPage = ({
       title: "渠道",
       key: "target",
       width: 200,
-      render: (_, log) => (
-        <Typography.Text strong ellipsis={{ tooltip: log.upstream_name || log.account_name || log.upstream_id || "订阅账号池" }}>
-          {log.upstream_name || log.account_name || log.upstream_id || "订阅账号池"}
-        </Typography.Text>
-      )
+      render: (_, log) => {
+        const targetName = log.account_id
+          ? accountPoolName
+          : log.upstream_name || log.account_name || log.upstream_id || "未识别渠道";
+        return <Typography.Text strong ellipsis={{ tooltip: targetName }}>{targetName}</Typography.Text>;
+      }
     },
     {
       title: "模型",
@@ -149,7 +155,7 @@ export const RequestAnalyticsPage = ({
       )
     },
     {
-      title: `估算成本（${currency}）`,
+      title: `估算成本（${currencyLabel}）`,
       key: "cost",
       width: 145,
       render: (_, log) => log.estimated_cost !== null && log.estimated_cost !== undefined
@@ -232,6 +238,7 @@ export const RequestAnalyticsPage = ({
           <Button icon={<ReloadOutlined />} onClick={resetFilters}>重置</Button>
         </Flex>
 
+        <Typography.Title level={5} className="v1-analytics-section-title">汇总指标</Typography.Title>
         <div className="v1-analytics-summary">
           <div className="v1-analytics-metric"><Statistic title="调用" value={summary.total.calls || 0} /></div>
           <TokenUsageTooltip usage={summary.total}>
@@ -240,12 +247,12 @@ export const RequestAnalyticsPage = ({
           <div className="v1-analytics-metric"><Statistic title="缓存命中" value={cacheHitRate(summary.total.input_tokens, summary.total.cached_input_tokens)} precision={1} suffix="%" /></div>
           <div className="v1-analytics-metric"><Statistic title="平均耗时" value={summary.total.average_duration_ms || 0} precision={0} suffix="ms" /></div>
           <div className={Number(summary.total.errors || 0) > 0 ? "v1-analytics-metric error" : "v1-analytics-metric"}><Statistic title="错误" value={summary.total.errors || 0} /></div>
-          <div className="v1-analytics-metric"><Statistic title={`估算成本（${currency}）`} value={summary.total.estimated_cost || 0} precision={4} /></div>
+          <div className="v1-analytics-metric"><Statistic title={`估算成本（${currencyLabel}）`} value={summary.total.estimated_cost || 0} precision={4} /></div>
         </div>
 
         {breakdownTotal > 0 && (
           <div className="v1-usage-section">
-            <Typography.Text strong>Token 用量</Typography.Text>
+            <Typography.Title level={5} className="v1-analytics-section-title">渠道与账号用量</Typography.Title>
             <div className="v1-usage-viewport">
               <div className="v1-usage-track">
                 {upstreamUsage.map((item) => (
@@ -263,9 +270,9 @@ export const RequestAnalyticsPage = ({
                   <div className="v1-usage-pool" style={usageShareStyle(accountPoolUsage.total_tokens, breakdownTotal)}>
                     {!accountPoolExpanded ? (
                       <TokenUsageTooltip usage={accountPoolUsage}>
-                        <button className="v1-usage-pool-summary" aria-label="展开 GPT 账号池" onClick={() => setAccountPoolExpanded(true)}>
+                        <button className="v1-usage-pool-summary" aria-label={`展开 ${accountPoolName}`} onClick={() => setAccountPoolExpanded(true)}>
                           <UsageSegmentContent
-                            name="GPT 账号池"
+                            name={accountPoolName}
                             tokens={accountPoolUsage.total_tokens}
                             percent={usagePercent(accountPoolUsage.total_tokens, breakdownTotal)}
                           />
@@ -278,7 +285,7 @@ export const RequestAnalyticsPage = ({
                             <button
                               className="v1-usage-account"
                               style={usageShareStyle(item.total_tokens, Number(accountPoolUsage.total_tokens || 0))}
-                              aria-label={`返回 GPT 账号池：${item.account_name || item.account_id || "未识别账号"}`}
+                              aria-label={`返回 ${accountPoolName}：${item.account_name || item.account_id || "未识别账号"}`}
                               onClick={() => setAccountPoolExpanded(false)}
                             >
                               <UsageSegmentContent
@@ -322,7 +329,7 @@ export const RequestAnalyticsPage = ({
           />
         </Flex>
       <Drawer title="调用详情" open={Boolean(selectedLog)} size={680} extra={selectedLog && <Button icon={<CopyOutlined />} onClick={() => copyValue(JSON.stringify(selectedLog, null, 2))}>复制 JSON</Button>} onClose={() => setSelectedLog(null)}>
-        {selectedLog && <Descriptions bordered column={1} size="small" items={requestLogDetails(selectedLog)} />}
+        {selectedLog && <Descriptions bordered column={1} size="small" items={requestLogDetails(selectedLog, accountPoolName)} />}
       </Drawer>
 
     </section>
@@ -393,13 +400,13 @@ const sumTokenUsage = (items: TokenAccountSummary[]): TokenTotals => {
   ])) as TokenTotals;
 };
 
-const requestLogDetails = (log: RequestLog) => {
+const requestLogDetails = (log: RequestLog, accountPoolName: string) => {
   const account = [log.account_name, log.account_email]
     .filter((value, index, values) => value && values.indexOf(value) === index)
     .join(" · ") || log.account_id || "-";
   return Object.entries({
     时间: formatTime(log.created_at),
-    渠道: log.upstream_name || log.upstream_id || log.account_name || "-",
+    渠道: log.account_id ? accountPoolName : log.upstream_name || log.upstream_id || log.account_name || "-",
     渠道类型: log.upstream_kind || "-",
     ...(log.account_id ? { 订阅账号: account } : {}),
     客户端模型: log.client_model || "-",

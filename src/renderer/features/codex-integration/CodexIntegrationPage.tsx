@@ -71,12 +71,12 @@ export const CodexIntegrationPage = ({
   return (
     <Card className="v1-page-card" variant="borderless">
       <Flex className="v1-page-actions" justify="flex-end" gap={16} wrap>
-        {settings.codex_auth_mode && <Tag color="success" icon={<CheckCircleOutlined />}>当前：{settings.codex_auth_mode === "gateway" ? "网关模式" : "账号模式"}</Tag>}
+        {settings.codex_auth_mode && <Tag color="success" icon={<CheckCircleOutlined />}>当前：{settings.codex_auth_mode === "gateway" ? "API 模式" : "账号模式"}</Tag>}
       </Flex>
 
       <Radio.Group value={mode} onChange={(event) => setMode(event.target.value as AuthMode)} className="v1-auth-mode-group">
         <Radio.Button value="gateway">
-          <Space><SafetyCertificateOutlined /><span>网关模式</span></Space>
+          <Space><SafetyCertificateOutlined /><span>API 模式</span></Space>
         </Radio.Button>
         <Radio.Button value="account">
           <Space><KeyOutlined /><span>账号模式</span></Space>
@@ -95,7 +95,7 @@ export const CodexIntegrationPage = ({
           />
           <Card size="small" title="配置写入方式">
             <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-              <Typography.Text type="secondary">决定应用网关模式时写入 config.toml 的连接配置。</Typography.Text>
+              <Typography.Text type="secondary">决定应用 API 模式时写入 config.toml 的连接配置。</Typography.Text>
               <Segmented
                 block
                 value={gatewayConfigMode}
@@ -120,7 +120,7 @@ export const CodexIntegrationPage = ({
             showIcon
             type="warning"
             title="Codex 将直接使用所选账号"
-            description="账号模式不会经过本地网关。需要使用模型渠道时，请重新应用网关模式。"
+            description="账号模式不会经过 API 服务。需要使用模型渠道时，请重新应用 API 模式。"
           />
           <Select
             showSearch
@@ -182,10 +182,10 @@ const providerToml = (settings: Settings, gatewayBase: string, modelCatalogPath:
     ].join("\n");
   }
   return [
-    'model_provider = "codex_gateway"',
+    'model_provider = "codexia"',
     catalog,
     "",
-    "[model_providers.codex_gateway]",
+    "[model_providers.codexia]",
     'name = "OpenAI"',
     `base_url = "${baseUrl}"`,
     'wire_api = "responses"',
